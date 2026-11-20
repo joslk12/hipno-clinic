@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/assets/favicons/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicons/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/assets/favicons/apple-touch-icon-180.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#F9F9F9" />
+    <title>Origen Consciente | Hipnosis Regresiva y Regenerativa</title>
+    <script>
+      ;(() => {
+        try {
+          const saved = localStorage.getItem('oc-theme')
+          const theme = saved === 'dark' ? 'dark' : 'light'
+          document.documentElement.dataset.theme = theme
+          document.documentElement.style.colorScheme = theme
+
+          let meta = document.querySelector('meta[name="theme-color"]')
+          if (!meta) {
+            meta = document.createElement('meta')
+            meta.name = 'theme-color'
+            document.head.appendChild(meta)
+          }
+          meta.content = theme === 'dark' ? '#1A1A1A' : '#F9F9F9'
+        } catch {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <form name="contact" method="POST" data-netlify="true" netlify-honeypot="bot-field" hidden>
+      <input type="hidden" name="form-name" value="contact" />
+      <label>Nombre Completo <input type="text" name="name" /></label>
+      <label>Correo Electrónico <input type="email" name="email" /></label>
+      <label>Teléfono o WhatsApp <input type="text" name="phone" /></label>
+      <label>Mensaje o Motivo de Consulta <textarea name="message"></textarea></label>
+      <label>No completar <input type="text" name="bot-field" /></label>
+    </form>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

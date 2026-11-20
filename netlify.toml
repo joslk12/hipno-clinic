@@ -1,0 +1,18 @@
+# Los headers de seguridad viven en public/_headers para que se apliquen
+# también en deploys por CLI o arrastrando la carpeta dist.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/reviews"
+  to = "/.netlify/functions/reviews"
+  status = 200
+  force = true

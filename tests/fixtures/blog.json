@@ -1,0 +1,22 @@
+[
+  {
+    "id": "fixture-1",
+    "slug": "hipnosis-regresiva-primeros-pasos",
+    "title": "Hipnosis regresiva: primeros pasos",
+    "excerpt": "Una guía breve para comprender qué ocurre en una sesión de hipnosis regresiva y cómo prepararte para ella.",
+    "contentHtml": "<h2>¿Qué es la hipnosis regresiva?</h2><p>La hipnosis regresiva es un acompañamiento respetuoso para explorar recuerdos y emociones que influyen en tu presente.</p><h2>Cómo prepararte</h2><ul><li>Llega con ropa cómoda.</li><li>Comparte tus objetivos con la especialista.</li><li>Permítete vivir la experiencia sin expectativas rígidas.</li></ul><p>Si tienes dudas, puedes <a href=\"/contacto\">agendar una conversación</a> antes de tu sesión.</p>",
+    "coverImage": "/assets/og/og-image.jpg",
+    "publishedAt": "2026-01-15T12:00:00.000Z",
+    "updatedAt": "2026-01-15T12:00:00.000Z"
+  },
+  {
+    "id": "fixture-2",
+    "slug": "sanacion-emocional-en-la-vida-cotidiana",
+    "title": "Sanación emocional en la vida cotidiana",
+    "excerpt": "Pequeños hábitos para acompañar tu proceso emocional entre una sesión y otra, con presencia y cuidado.",
+    "contentHtml": "<h2>Escuchar lo que sientes</h2><p>La sanación emocional también ocurre en los momentos sencillos: una pausa, una respiración consciente o una conversación honesta.</p><h2>Tres prácticas para empezar</h2><ol><li>Dedica cinco minutos al día a respirar sin distracciones.</li><li>Escribe lo que necesitas decirte con amabilidad.</li><li>Busca apoyo cuando el proceso se sienta pesado.</li></ol><blockquote><p>Sanar no es olvidar; es aprender a sostener tu historia con más compasión.</p></blockquote>",
+    "coverImage": null,
+    "publishedAt": "2026-02-20T12:00:00.000Z",
+    "updatedAt": "2026-02-20T12:00:00.000Z"
+  }
+]
