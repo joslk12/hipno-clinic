@@ -28,7 +28,14 @@ function jsonResponse(data: unknown, status = 200) {
   }
 }
 
-function mockFetch(options: { session?: number; clients?: number; saveError?: string } = {}) {
+function mockFetch(
+  options: {
+    session?: number
+    clients?: number
+    saveError?: string
+    invitationResult?: unknown
+  } = {}
+) {
   const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     if (url === '/api/admin/review-clients' && init?.method === 'POST' && options.saveError) {
       return Promise.resolve(jsonResponse({ error: options.saveError }, 400))
@@ -48,6 +55,19 @@ function mockFetch(options: { session?: number; clients?: number; saveError?: st
       )
     }
     if (url === '/api/admin/review-invitations') {
+      if (init?.method === 'POST') {
+        return Promise.resolve(
+          jsonResponse(
+            options.invitationResult ?? {
+              invitationId: 'inv-1',
+              link: 'https://origenconsciente.mx/resenas?token=abc',
+              status: 'pendiente',
+              results: [],
+              message: 'Liga generada.'
+            }
+          )
+        )
+      }
       return Promise.resolve(
         jsonResponse({ invitations: [], channels: { email: true, whatsapp: true } })
       )
@@ -121,5 +141,44 @@ describe('AdminReviewsView', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Datos inválidos.'))
+  })
+
+  it('genera el mensaje de WhatsApp y permite copiarlo y abrirlo', async () => {
+    const text =
+      'Hola Ana López, gracias por acompañarnos en Origen Consciente. Usa esta liga: https://origenconsciente.mx/resenas?token=abc'
+    const whatsappUrl = `https://wa.me/525631270122?text=${encodeURIComponent(text)}`
+    const fetchMock = mockFetch({
+      invitationResult: {
+        invitationId: 'inv-1',
+        link: 'https://origenconsciente.mx/resenas?token=abc',
+        status: 'pendiente',
+        results: [],
+        whatsapp: { text, url: whatsappUrl },
+        message: 'Liga generada. Copia el mensaje y envíalo desde tu WhatsApp.'
+      }
+    })
+    await renderView()
+
+    await waitFor(() => expect(screen.getByText('Ana López')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: 'Elegir' }))
+    await userEvent.click(screen.getByRole('button', { name: 'GENERAR MENSAJE DE WHATSAPP' }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Mensaje para WhatsApp')).toHaveValue(text)
+    )
+    expect(screen.getByRole('button', { name: 'COPIAR MENSAJE' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'ABRIR WHATSAPP' })).toHaveAttribute(
+      'href',
+      whatsappUrl
+    )
+
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) => url === '/api/admin/review-invitations' && init?.method === 'POST'
+    )
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      clientId: 'client-1',
+      channels: [],
+      generateWhatsapp: true
+    })
   })
 })

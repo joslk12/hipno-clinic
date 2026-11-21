@@ -30,6 +30,7 @@ interface SendBody {
   link: string
   results: Array<{ ok: boolean; error?: string }>
   status: string
+  whatsapp?: { text: string; url: string }
 }
 
 interface ListBody {
@@ -67,6 +68,26 @@ describe('invitations handler', () => {
     const body = await readJson<ListBody>(response)
 
     expect(body).toEqual({ invitations: [], channels: { email: true, whatsapp: false } })
+  })
+
+  it('genera un mensaje de WhatsApp listo para copiar sin usar la API', async () => {
+    const messageSender = sender({ whatsappConfigured: false })
+    const { handle } = setup(messageSender)
+
+    const response = await handle(
+      request('/api/admin/review-invitations', {
+        method: 'POST',
+        body: JSON.stringify({ clientId: 'client-1', channels: [], generateWhatsapp: true })
+      })
+    )
+    expect(response.status).toBe(200)
+
+    const body = await readJson<SendBody>(response)
+    expect(body.status).toBe('pendiente')
+    expect(body.results).toHaveLength(0)
+    expect(messageSender.sendWhatsApp).not.toHaveBeenCalled()
+    expect(body.whatsapp?.text).toContain('Ana López')
+    expect(body.whatsapp?.url).toMatch(/^https:\/\/wa\.me\/525631270122\?text=/)
   })
 
   it('envía por ambos canales y guarda el historial', async () => {

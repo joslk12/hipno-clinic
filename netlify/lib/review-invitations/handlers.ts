@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type {
+  InvitationChannel,
   InvitationSendRecord,
   ReviewClient,
   ReviewInvitation,
@@ -7,7 +8,11 @@ import type {
 } from '../../../src/types/review-invitations'
 import { hasValidSession, isAllowedOrigin } from '../blog/auth'
 import { adminJson, errorResponse, methodNotAllowed, publicJson, readJson } from '../blog/http'
-import type { InvitationSender } from './messaging'
+import {
+  buildInvitationMessage,
+  buildWhatsAppLink,
+  type InvitationSender
+} from './messaging'
 import type { ClientStore, InvitationStore } from './store'
 import {
   createInvitationToken,
@@ -202,7 +207,14 @@ export function createReviewInvitationsHandler(options: InvitationsHandlerOption
         const client = await options.clientStore.getClient(clientId)
         if (!client) return errorResponse(404, 'El cliente no existe.')
 
-        const channels = validateChannels(body.channels, client)
+        const generateWhatsapp = body.generateWhatsapp === true
+        if (generateWhatsapp && !client.whatsapp) {
+          return errorResponse(400, 'El cliente no tiene WhatsApp registrado.')
+        }
+
+        const channels = generateWhatsapp
+          ? ({ ok: true as const, value: [] as InvitationChannel[] })
+          : validateChannels(body.channels, client)
         if (!channels.ok) return errorResponse(400, channels.error)
 
         let previous: ReviewInvitation | null = null
@@ -240,6 +252,14 @@ export function createReviewInvitationsHandler(options: InvitationsHandlerOption
         }
 
         const link = `${options.siteUrl}/resenas?token=${encodeURIComponent(token)}`
+        const whatsappNumber = client.whatsapp
+        const whatsappText = whatsappNumber
+          ? buildInvitationMessage(client.name, link)
+          : undefined
+        const whatsapp = whatsappText
+          ? { text: whatsappText, url: buildWhatsAppLink(whatsappNumber, whatsappText) }
+          : undefined
+
         const results = await Promise.all(
           channels.value.map(async (channel) => {
             const input = {
@@ -278,9 +298,12 @@ export function createReviewInvitationsHandler(options: InvitationsHandlerOption
           link,
           status: updated.status,
           results,
-          message: anyOk
-            ? 'Liga enviada.'
-            : 'No se pudo enviar la liga. Revisa el error e inténtalo de nuevo.'
+          ...(whatsapp ? { whatsapp } : {}),
+          message: generateWhatsapp
+            ? 'Liga generada. Copia el mensaje y envíalo desde tu WhatsApp.'
+            : anyOk
+              ? 'Liga enviada.'
+              : 'No se pudo enviar la liga. Revisa el error e inténtalo de nuevo.'
         })
       }
 

@@ -73,6 +73,13 @@ export interface SendInvitationInput {
   clientId: string
   channels: InvitationChannel[]
   invitationId?: string
+  /** Genera la liga y devuelve un mensaje listo para copiar en WhatsApp. */
+  generateWhatsapp?: boolean
+}
+
+export interface ManualWhatsappMessage {
+  text: string
+  url: string
 }
 
 export interface SendInvitationResult {
@@ -85,6 +92,7 @@ export interface SendInvitationResult {
     error?: string
     providerMessageId?: string
   }>
+  whatsapp?: ManualWhatsappMessage
   message: string
 }
 

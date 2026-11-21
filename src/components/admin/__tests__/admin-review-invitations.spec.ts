@@ -42,6 +42,16 @@ describe('AdminReviewInvitationActions', () => {
     expect(emitted().send).toEqual([[['whatsapp']]])
   })
 
+  it('permite generar el mensaje de WhatsApp sin proveedor configurado', async () => {
+    const { emitted } = render(AdminReviewInvitationActions, {
+      props: { client, emailConfigured: false, whatsappConfigured: false }
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'GENERAR MENSAJE DE WHATSAPP' }))
+
+    expect(emitted()['prepare-whatsapp']).toEqual([[]])
+  })
+
   it('muestra REENVIAR cuando la liga está canjeada', async () => {
     const { emitted } = render(AdminReviewInvitationActions, {
       props: {

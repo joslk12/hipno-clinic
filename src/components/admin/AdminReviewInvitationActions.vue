@@ -15,12 +15,20 @@ const props = defineProps<{
   sending?: boolean
 }>()
 
-const emit = defineEmits<{ send: [channels: InvitationChannel[]] }>()
+const emit = defineEmits<{
+  send: [channels: InvitationChannel[]]
+  'prepare-whatsapp': []
+}>()
 
 const channels = ref<InvitationChannel[]>([])
 
 const emailAvailable = computed(() => Boolean(props.client.email) && props.emailConfigured)
 const whatsappAvailable = computed(() => Boolean(props.client.whatsapp) && props.whatsappConfigured)
+const canPrepareWhatsapp = computed(() => Boolean(props.client.whatsapp) && !props.sending)
+const whatsappHint = computed(() => {
+  if (!props.client.whatsapp) return 'sin número registrado'
+  return props.whatsappConfigured ? '' : 'usa «Generar mensaje» para copiar la liga'
+})
 
 const canSend = computed(() => channels.value.length > 0 && !props.sending)
 
@@ -84,14 +92,22 @@ function submit() {
           @change="toggle('whatsapp')"
         />
         WhatsApp
-        <span v-if="!whatsappAvailable" class="text-text-muted">
-          ({{ client.whatsapp ? 'proveedor no configurado' : 'sin número registrado' }})
-        </span>
+        <span v-if="whatsappHint" class="text-text-muted">({{ whatsappHint }})</span>
       </label>
     </div>
 
-    <BaseButton :loading="sending" :disabled="!canSend" @click="submit">
-      {{ needsResend ? 'REENVIAR (NUEVA LIGA)' : 'ENVIAR LIGA' }}
-    </BaseButton>
+    <div class="flex flex-wrap gap-3">
+      <BaseButton :loading="sending" :disabled="!canSend" @click="submit">
+        {{ needsResend ? 'REENVIAR (NUEVA LIGA)' : 'ENVIAR LIGA' }}
+      </BaseButton>
+      <BaseButton
+        variant="secondary"
+        :disabled="!canPrepareWhatsapp"
+        :loading="sending && !canSend"
+        @click="emit('prepare-whatsapp')"
+      >
+        GENERAR MENSAJE DE WHATSAPP
+      </BaseButton>
+    </div>
   </section>
 </template>

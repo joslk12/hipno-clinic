@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import AdminLogin from '../../components/admin/AdminLogin.vue'
 import AdminNav from '@/components/admin/AdminNav.vue' 
 import AdminReviewClientForm from '../../components/admin/AdminReviewClientForm.vue'
 import AdminReviewClientList from '../../components/admin/AdminReviewClientList.vue'
 import AdminReviewInvitationActions from '../../components/admin/AdminReviewInvitationActions.vue'
+import BaseButton from '../../components/ui/BaseButton.vue'
 import { usePageMeta } from '../../composables/usePageMeta'
 import { AdminBlogApiError, getSession, logout } from '../../services/adminBlog'
 import {
@@ -44,6 +45,8 @@ const sending = ref('')
 const notice = ref('')
 const actionError = ref('')
 const lastResult = ref<SendInvitationResult | null>(null)
+const copied = ref(false)
+const whatsappMessage = computed(() => lastResult.value?.whatsapp ?? null)
 
 function resetSession() {
   authenticated.value = false
@@ -166,6 +169,7 @@ async function handleSend(selectedChannels: InvitationChannel[]) {
   sending.value = selected.value.id
   actionError.value = ''
   lastResult.value = null
+  copied.value = false
 
   try {
     const invitationId = invitations.value.find((item) => item.clientId === selected.value?.id)?.id
@@ -181,6 +185,53 @@ async function handleSend(selectedChannels: InvitationChannel[]) {
     handleApiError(caught, 'No pudimos enviar la liga.')
   } finally {
     sending.value = ''
+  }
+}
+
+async function handlePrepareWhatsapp() {
+  if (!selected.value) return
+
+  sending.value = selected.value.id
+  actionError.value = ''
+  lastResult.value = null
+  copied.value = false
+
+  try {
+    const invitationId = invitations.value.find((item) => item.clientId === selected.value?.id)?.id
+    const result = await sendInvitation({
+      clientId: selected.value.id,
+      channels: [],
+      generateWhatsapp: true,
+      ...(invitationId ? { invitationId } : {})
+    })
+    lastResult.value = result
+    notice.value = result.message
+    await loadData()
+  } catch (caught) {
+    handleApiError(caught, 'No pudimos generar la liga de WhatsApp.')
+  } finally {
+    sending.value = ''
+  }
+}
+
+async function copyMessage(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const area = document.createElement('textarea')
+      area.value = text
+      area.setAttribute('readonly', '')
+      area.style.position = 'fixed'
+      area.style.opacity = '0'
+      document.body.appendChild(area)
+      area.select()
+      document.execCommand?.('copy')
+      document.body.removeChild(area)
+    }
+    copied.value = true
+  } catch {
+    copied.value = false
   }
 }
 
@@ -245,6 +296,7 @@ onMounted(checkSession)
         :whatsapp-configured="channels.whatsapp"
         :sending="sending === selected.id"
         @send="handleSend"
+        @prepare-whatsapp="handlePrepareWhatsapp"
       />
 
       <div v-if="lastResult" class="rounded-xl border border-border bg-surface p-6">
@@ -257,6 +309,39 @@ onMounted(checkSession)
         <p class="mt-3 break-all font-body text-sm text-text">
           <a :href="lastResult.link" class="underline">{{ lastResult.link }}</a>
         </p>
+
+        <div v-if="whatsappMessage" class="mt-4 space-y-3 border-t border-border pt-4">
+          <p class="font-body text-sm font-semibold text-text">Mensaje para WhatsApp</p>
+          <textarea
+            :value="whatsappMessage.text"
+            readonly
+            rows="3"
+            aria-label="Mensaje para WhatsApp"
+            class="w-full rounded-md border border-border bg-bg p-3 font-body text-sm text-text"
+          />
+          <div class="flex flex-wrap gap-3">
+            <BaseButton type="button" variant="secondary" @click="copyMessage(whatsappMessage.text)">
+              {{ copied ? 'MENSAJE COPIADO' : 'COPIAR MENSAJE' }}
+            </BaseButton>
+            <BaseButton
+              as="a"
+              variant="ghost"
+              :href="whatsappMessage.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              ABRIR WHATSAPP
+            </BaseButton>
+          </div>
+          <p
+            v-if="copied"
+            class="font-body text-xs text-text-muted"
+            role="status"
+            aria-live="polite"
+          >
+            Mensaje copiado. Pégalo en el chat de tu clienta y envíalo desde tu WhatsApp.
+          </p>
+        </div>
       </div>
     </div>
   </div>

@@ -22,7 +22,7 @@ export const pageMeta = {
   reviews: {
     title: 'Reseñas de clientas | Origen Consciente',
     description:
-      'Lee las opiniones de clientas de Origen Consciente y comparte tu experiencia con la hipnosis regresiva y regenerativa.',
+      'Lee las opiniones de clientes de Origen Consciente y comparte tu experiencia con la hipnosis regresiva y regenerativa.',
     path: '/resenas'
   },
   blog: {
