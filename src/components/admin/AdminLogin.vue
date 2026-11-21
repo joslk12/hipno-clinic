@@ -40,9 +40,9 @@ async function submit() {
       <p class="font-body text-xs font-semibold uppercase tracking-[0.24em] text-accent">
         Administración
       </p>
-      <h1 class="mt-2 font-display text-3xl font-semibold text-accent">Blog</h1>
+      <h1 class="mt-2 font-display text-3xl font-semibold text-accent">Panel de administrador</h1>
       <p class="mt-3 font-body text-sm leading-relaxed text-text-muted">
-        Ingresa la contraseña para administrar los artículos del blog.
+        Ingresa la contraseña para administrar los artículos del blog, invitación de reseñas y manejo de citas.
       </p>
 
       <form class="mt-6 space-y-5" @submit.prevent="submit">

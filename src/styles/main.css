@@ -38,7 +38,15 @@ body {
     }
 }
 
+.nl-wrap {
+  display: none !important;
+}
+
 .nl-card {
+  display: none !important;
+}
+
+.nl-badge {
   display: none !important;
 }
 

@@ -103,7 +103,9 @@ describe('AdminReviewsView', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Panel de administrador' })).toBeInTheDocument()
+    )
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/logout', expect.anything())
   })
 
@@ -111,7 +113,9 @@ describe('AdminReviewsView', () => {
     mockFetch({ session: 401 })
     await renderView()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Panel de administrador' })).toBeInTheDocument()
+    )
 
     await userEvent.type(screen.getByLabelText('Contraseña'), 'secreto')
     await userEvent.click(screen.getByRole('button', { name: 'Entrar' }))
