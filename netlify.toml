@@ -6,6 +6,12 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Estas tres variables son configuración pública (URL del sitio, número de
+  # WhatsApp y URL de la API), no credenciales. Sus valores aparecen en el
+  # código y en el sitemap, por lo que el escaneo de secretos de Netlify los
+  # marca falsos positivos. Se omiten solo estas llaves; el resto de secretos
+  # (contraseña admin, tokens, API keys) siguen siendo escaneados.
+  SECRETS_SCAN_OMIT_KEYS = "BLOG_API_URL,VITE_WHATSAPP_NUMBER,VITE_SITE_URL"
 
 [functions]
   directory = "netlify/functions"

@@ -39,10 +39,12 @@ Edita `.env.local` con los valores del entorno local.
 | `REVIEWS_RATE_SALT` | Sí (funciones) | Sal secreta para hashear IPs y aplicar el límite de 3 reseñas por IP/24 h. |
 | `RESEND_API_KEY` | Sí (envío) | Clave de la API de Resend para enviar las ligas por correo. |
 | `REVIEWS_FROM_EMAIL` | Sí (envío) | Remitente verificado de Resend, p. ej. `Origen Consciente <hola@origenconsciente.mx>`. |
-| `WHATSAPP_ACCESS_TOKEN` | Sí (envío) | Token de WhatsApp Cloud API. |
-| `WHATSAPP_PHONE_NUMBER_ID` | Sí (envío) | ID del número de WhatsApp usado para enviar. |
+
+El envío de WhatsApp es manual: desde `/admin/resenas` se genera la liga y un mensaje listo para copiar o abrir con `wa.me`, usando el WhatsApp personal de la clínica. No se necesita WhatsApp Business ni Cloud API.
 
 En Netlify, define las mismas variables en **Site configuration → Environment variables**. `VITE_SITE_URL` debe coincidir con el dominio final para que canonical, OG y sitemap sean correctos.
+
+`BLOG_API_URL`, `VITE_WHATSAPP_NUMBER` y `VITE_SITE_URL` son valores públicos. Si las marcas como secretos, el escaneo de Netlify fallará el build porque esos valores también viven en el código y el sitemap; `netlify.toml` ya las excluye del escaneo mediante `SECRETS_SCAN_OMIT_KEYS`. El resto de variables sí deben ir marcadas como secretas.
 
 ## Comandos
 
