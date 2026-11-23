@@ -40,6 +40,25 @@ describe('validación de reglas', () => {
     }
   })
 
+  it('rechaza horas fuera del horario de la clínica, como medianoche', () => {
+    const ruleResult = validateRuleInput({
+      weekday: 1,
+      startTime: '00:00',
+      durationMinutes: 60,
+      active: true
+    })
+    expect(ruleResult.ok).toBe(false)
+    if (!ruleResult.ok) expect(ruleResult.fields.startTime).toContain('06:00')
+
+    const slotResult = validateManualSlotInput({
+      date: '2026-03-04',
+      time: '00:00',
+      durationMinutes: 60
+    })
+    expect(slotResult.ok).toBe(false)
+    if (!slotResult.ok) expect(slotResult.fields.time).toContain('22:00')
+  })
+
   it('detecta solapamientos considerando duración y vigencia', () => {
     const existing = rule({ id: 'otra', startTime: '11:00', durationMinutes: 60 })
     const result = validateRuleInput(

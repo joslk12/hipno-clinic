@@ -406,9 +406,6 @@ export function createAdminAppointmentSlotsHandler(deps: AppointmentHandlerDeps)
 
         const existing = await deps.store.getManualSlot(slotKey)
         if (!existing) return errorResponse(404, 'El horario no existe.')
-        if (existing.source !== 'manual') {
-          return errorResponse(400, 'Solo se pueden eliminar horarios individuales.')
-        }
         const reservedKeys = await deps.store.listReservedSlotKeys()
         if (reservedKeys.includes(slotKey)) {
           return errorResponse(409, 'El horario tiene una reserva activa. Cancela la cita antes de eliminarlo.')

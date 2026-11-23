@@ -1,10 +1,14 @@
+import {
+  APPOINTMENTS_FIRST_START,
+  APPOINTMENTS_LAST_START
+} from '../../../src/types/appointments'
 import type {
   AppointmentInput,
   AvailabilityRule,
   AvailabilityRuleInput,
   Weekday
 } from '../../../src/types/appointments'
-import { isValidDateKey, isValidTimeString, parseSlotKey } from './timezone'
+import { isValidDateKey, isBookableTime, parseSlotKey } from './timezone'
 
 export type FieldErrors = Record<string, string>
 
@@ -37,6 +41,8 @@ function timeToMinutes(time: string): number {
   const [hours, minutes] = time.split(':').map(Number)
   return hours * 60 + minutes
 }
+
+const OPENING_HOURS_MESSAGE = `La hora debe estar entre las ${APPOINTMENTS_FIRST_START} y las ${APPOINTMENTS_LAST_START}.`
 
 function validityRangesOverlap(
   leftFrom: string | null,
@@ -79,8 +85,8 @@ export function validateRuleInput(
   }
 
   const startTime = input.startTime
-  if (!isValidTimeString(startTime)) {
-    fields.startTime = 'Escribe una hora válida en formato HH:mm.'
+  if (!isBookableTime(startTime)) {
+    fields.startTime = OPENING_HOURS_MESSAGE
   }
 
   const durationMinutes = input.durationMinutes
@@ -178,8 +184,8 @@ export function validateManualSlotInput(input: unknown): ValidationResult<ValidM
   if (!isValidDateKey(dateKey)) {
     fields.date = 'Escribe una fecha válida en formato AAAA-MM-DD.'
   }
-  if (!isValidTimeString(input.time)) {
-    fields.time = 'Escribe una hora válida en formato HH:mm.'
+  if (!isBookableTime(input.time)) {
+    fields.time = OPENING_HOURS_MESSAGE
   }
   const durationMinutes = input.durationMinutes
   if (

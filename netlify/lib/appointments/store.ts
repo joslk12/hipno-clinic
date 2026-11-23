@@ -225,7 +225,7 @@ export function createPostgresAppointmentStore(getSql: SqlProvider): Appointment
     },
     async deleteManualSlot(slotKey) {
       await withSql(async (sql) => {
-        await sql`DELETE FROM schedule_slots WHERE slot_key = ${slotKey} AND source = 'manual'`
+        await sql`DELETE FROM schedule_slots WHERE slot_key = ${slotKey}`
       })
     },
 

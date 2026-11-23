@@ -1,3 +1,7 @@
+/** Primer y último horario de inicio permitido, en hora local de la clínica. */
+export const APPOINTMENTS_FIRST_START = '06:00'
+export const APPOINTMENTS_LAST_START = '22:00'
+
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
 
 export type AppointmentStatus = 'reserved' | 'cancelled'

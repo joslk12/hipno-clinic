@@ -53,6 +53,31 @@ describe('generación de horarios', () => {
     expect(slots[1]).toMatchObject({ source: 'manual', durationMinutes: 45 })
   })
 
+  it('ignora reglas y horarios fuera del horario de la clínica', async () => {
+    const store = createMemoryAppointmentStore({
+      rules: [
+        rule({ id: 'medianoche', startTime: '00:00' }),
+        rule({ id: 'correcta', startTime: '10:00' })
+      ],
+      slots: [
+        slotRecord({
+          id: 'manual-medianoche',
+          slotKey: '2026-03-04T00:00',
+          startsAt: '2026-03-03T06:00:00.000Z',
+          source: 'manual'
+        })
+      ]
+    })
+
+    const slots = await getAvailableSlots({
+      store,
+      now: fixedNow(),
+      from: '2026-03-02',
+      to: '2026-03-09'
+    })
+    expect(slots.map((slot) => slot.slotKey)).toEqual(['2026-03-02T10:00', '2026-03-09T10:00'])
+  })
+
   it('filtra por servicio sin ocultar horarios genéricos', async () => {
     const store = seededStore()
     const hipnosis = await getAvailableSlots({

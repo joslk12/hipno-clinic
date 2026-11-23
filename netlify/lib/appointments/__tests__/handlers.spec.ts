@@ -298,6 +298,27 @@ describe('handlers administrativos de citas', () => {
     expect(deleted.status).toBe(200)
   })
 
+  it('permite eliminar horarios materializados sin reserva activa', async () => {
+    const store = createMemoryAppointmentStore({
+      slots: [
+        slotRecord({
+          id: 'materializada',
+          slotKey: '2026-03-10T10:00',
+          startsAt: '2026-03-10T16:00:00.000Z',
+          source: 'rule',
+          ruleId: 'regla-1'
+        })
+      ]
+    })
+    const handler = createAdminAppointmentSlotsHandler(deps(store))
+
+    const response = await handler(
+      adminRequest('/api/admin/appointments/slots?slotKey=2026-03-10T10:00', { method: 'DELETE' })
+    )
+    expect(response.status).toBe(200)
+    expect(await store.getManualSlot('2026-03-10T10:00')).toBeNull()
+  })
+
   it('lista citas y cancela solo las futuras', async () => {
     const store = createMemoryAppointmentStore({
       rules: [rule()],

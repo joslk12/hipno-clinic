@@ -153,12 +153,12 @@ test('gestiona reglas, bloqueos y citas desde /admin/citas', async ({ page }) =>
   await expect(page.getByRole('heading', { level: 1, name: 'Citas' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Admin' })).toBeVisible()
 
-  await page.locator('#rule-start-time').fill('11:00')
-  await page.locator('#rule-duration').fill('90')
-  await page.getByRole('button', { name: 'CREAR REGLA' }).click()
+  await page.getByRole('checkbox', { name: 'lunes 11:00' }).check()
+  await page.locator('#grid-duration').fill('90')
+  await page.getByRole('button', { name: 'GUARDAR DISPONIBILIDAD' }).click()
 
-  await expect(page.getByText('Regla creada (lunes).')).toBeVisible()
-  await expect(page.getByRole('cell', { name: '11:00' })).toBeVisible()
+  await expect(page.getByText('Disponibilidad guardada (1 horarios).')).toBeVisible()
+  await expect(page.locator('td[title="11:00"]')).toBeVisible()
   expect(mutations[0]).toMatchObject({
     path: '/api/admin/appointments/rules',
     method: 'POST',

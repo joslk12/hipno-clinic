@@ -5,6 +5,11 @@
  * Las conversiones usan Intl.DateTimeFormat para no depender de la zona del
  * servidor ni de librerías de fechas.
  */
+import {
+  APPOINTMENTS_FIRST_START,
+  APPOINTMENTS_LAST_START
+} from '../../../src/types/appointments'
+
 export const APPOINTMENTS_TIME_ZONE = 'America/Mexico_City'
 
 export interface ZonedParts {
@@ -81,6 +86,18 @@ export function isValidDateKey(value: unknown): value is string {
 
 export function isValidTimeString(value: unknown): value is string {
   return typeof value === 'string' && TIME_PATTERN.test(value)
+}
+
+/**
+ * Hora de inicio publicable. Las reglas o excluidas antiguas fuera del
+ * horario de la clínica (p. ej. 00:00) no generan horarios reservables.
+ */
+export function isBookableTime(value: unknown): value is string {
+  return (
+    isValidTimeString(value) &&
+    value >= APPOINTMENTS_FIRST_START &&
+    value <= APPOINTMENTS_LAST_START
+  )
 }
 
 export interface SlotKeyParts {

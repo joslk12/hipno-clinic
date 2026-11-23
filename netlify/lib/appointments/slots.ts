@@ -5,8 +5,8 @@ import {
   addDaysToDateKey,
   formatLocalDateKey,
   getWeekday,
+  isBookableTime,
   isPastInstant,
-  isValidTimeString,
   parseSlotKey,
   slotKeyToUtc
 } from './timezone'
@@ -57,7 +57,7 @@ export function buildSlotCatalog(options: BuildCatalogOptions): SlotCatalog {
   const blockedKeys = new Set<string>()
 
   for (const rule of options.rules) {
-    if (!rule.active || !isValidTimeString(rule.startTime)) continue
+    if (!rule.active || !isBookableTime(rule.startTime)) continue
 
     for (let dateKey = options.from; dateKey <= options.to; ) {
       const ruleWeekday = getWeekday(dateKey)
@@ -88,7 +88,14 @@ export function buildSlotCatalog(options: BuildCatalogOptions): SlotCatalog {
 
   for (const stored of options.storedSlots) {
     const parsed = parseSlotKey(stored.slotKey)
-    if (!parsed || parsed.dateKey < options.from || parsed.dateKey > options.to) continue
+    if (
+      !parsed ||
+      !isBookableTime(parsed.time) ||
+      parsed.dateKey < options.from ||
+      parsed.dateKey > options.to
+    ) {
+      continue
+    }
 
     if (stored.blocked) {
       blockedKeys.add(stored.slotKey)

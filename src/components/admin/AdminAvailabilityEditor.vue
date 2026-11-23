@@ -26,6 +26,7 @@ import {
   setSlotBlocked,
   updateRule
 } from '../../services/adminAppointments'
+import { APPOINTMENTS_FIRST_START, APPOINTMENTS_LAST_START } from '../../types/appointments'
 import type {
   Appointment,
   AvailabilityRule,
@@ -55,16 +56,53 @@ const loadError = ref('')
 const actionError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
 const saving = ref(false)
-const editingRuleId = ref<string | null>(null)
-/** Reglas con la misma hora/duración/servicio/vigencia se editan como un grupo. */
-const editingGroupIds = ref<string[]>([])
 const selectedDay = ref<string | null>(null)
 const blockUntil = ref('20:00')
 
-function emptyRuleForm() {
+type WeekdayNumber = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map(Number)
+  return (hours ?? 0) * 60 + (minutes ?? 0)
+}
+
+function minutesToTime(value: number): string {
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+}
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+const OPENING_HOURS_MESSAGE = `La hora debe estar entre las ${APPOINTMENTS_FIRST_START} y las ${APPOINTMENTS_LAST_START}.`
+
+/** Las reglas antiguas fuera de este rango (p. ej. 00:00) no se publican. */
+function isBookableTime(value: string): boolean {
+  return (
+    TIME_PATTERN.test(value) &&
+    value >= APPOINTMENTS_FIRST_START &&
+    value <= APPOINTMENTS_LAST_START
+  )
+}
+
+/** Cuadrícula día × hora: una celda por combinación de día y hora local. */
+const gridStep = ref(60)
+const gridTimes = computed(() => {
+  const times: string[] = []
+  const last = timeToMinutes(APPOINTMENTS_LAST_START)
+  for (
+    let minutes = timeToMinutes(APPOINTMENTS_FIRST_START);
+    minutes <= last;
+    minutes += gridStep.value
+  ) {
+    times.push(minutesToTime(minutes))
+  }
+  return times
+})
+/** Celdas marcadas en formato `weekday:HH:mm`. */
+const gridSelection = ref<string[]>([])
+/** Al editar un grupo solo se modifican sus reglas. */
+const editingGroupIds = ref<string[]>([])
+
+function emptyGridForm() {
   return {
-    weekdays: ['1'] as string[],
-    startTime: '10:00',
     durationMinutes: 60,
     serviceId: '',
     validFrom: '',
@@ -73,7 +111,7 @@ function emptyRuleForm() {
   }
 }
 
-const ruleForm = reactive(emptyRuleForm())
+const gridForm = reactive(emptyGridForm())
 const slotForm = reactive({ date: todayKey, time: '10:00', durationMinutes: 60, serviceId: '' })
 const extraSlotForm = reactive({ time: '11:00', durationMinutes: 60 })
 
@@ -105,24 +143,121 @@ function errorFor(field: string): string {
   return fieldErrors.value[field] ?? ''
 }
 
-function resetRuleForm() {
-  Object.assign(ruleForm, emptyRuleForm())
-  editingRuleId.value = null
+function cellKey(weekday: WeekdayNumber, time: string): string {
+  return `${weekday}:${time}`
+}
+
+function isSelected(weekday: WeekdayNumber, time: string): boolean {
+  return gridSelection.value.includes(cellKey(weekday, time))
+}
+
+function toggleCell(weekday: WeekdayNumber, time: string) {
+  const key = cellKey(weekday, time)
+  gridSelection.value = isSelected(weekday, time)
+    ? gridSelection.value.filter((item) => item !== key)
+    : [...gridSelection.value, key]
+}
+
+function selectRow(time: string) {
+  gridSelection.value = [
+    ...new Set([...gridSelection.value, ...CALENDAR_WEEKDAYS.map((day) => cellKey(day, time))])
+  ]
+}
+
+function selectColumn(weekday: WeekdayNumber) {
+  gridSelection.value = [
+    ...new Set([...gridSelection.value, ...gridTimes.value.map((time) => cellKey(weekday, time))])
+  ]
+}
+
+function clearGrid() {
+  gridSelection.value = []
   editingGroupIds.value = []
+  actionError.value = ''
   fieldErrors.value = {}
 }
 
-function ruleGroupOf(rule: AvailabilityRule): AvailabilityRule[] {
-  return rules.value.filter(
-    (item) =>
-      item.id === rule.id ||
-      (item.startTime === rule.startTime &&
-        item.durationMinutes === rule.durationMinutes &&
-        item.serviceId === rule.serviceId &&
-        item.validFrom === rule.validFrom &&
-        item.validUntil === rule.validUntil &&
-        item.active === rule.active)
+function cancelGridEdit() {
+  editingGroupIds.value = []
+  actionError.value = ''
+  fieldErrors.value = {}
+  syncGridFromRules()
+}
+
+function bookableRules(): AvailabilityRule[] {
+  return rules.value.filter((rule) => isBookableTime(rule.startTime))
+}
+
+const outOfRangeRuleList = computed(() =>
+  rules.value.filter((rule) => !isBookableTime(rule.startTime))
+)
+
+const individualSlots = computed(() =>
+  manualSlots.value.filter((slot) => slot.source === 'manual')
+)
+
+interface RuleGroup {
+  key: string
+  rules: AvailabilityRule[]
+  weekdays: WeekdayNumber[]
+  times: string[]
+  durationMinutes: number
+  serviceId: string | null
+  validFrom: string | null
+  validUntil: string | null
+  active: boolean
+}
+
+function ruleGroupKey(rule: AvailabilityRule): string {
+  return [
+    rule.durationMinutes,
+    rule.serviceId ?? '',
+    rule.validFrom ?? '',
+    rule.validUntil ?? '',
+    String(rule.active)
+  ].join('|')
+}
+
+/** Una fila por combinación de duración/servicio/vigencia/estado. */
+const ruleGroups = computed<RuleGroup[]>(() => {
+  const grouped = new Map<string, AvailabilityRule[]>()
+  for (const rule of rules.value) {
+    const key = ruleGroupKey(rule)
+    grouped.set(key, [...(grouped.get(key) ?? []), rule])
+  }
+  return [...grouped.entries()].map(([key, list]) => ({
+    key,
+    rules: list,
+    weekdays: [...new Set(list.map((rule) => rule.weekday))].sort((a, b) => a - b),
+    times: [...new Set(list.map((rule) => rule.startTime))].sort(),
+    durationMinutes: list[0]!.durationMinutes,
+    serviceId: list[0]!.serviceId,
+    validFrom: list[0]!.validFrom,
+    validUntil: list[0]!.validUntil,
+    active: list[0]!.active
+  }))
+})
+
+function applyProfileToGrid(rulesToShow: AvailabilityRule[]) {
+  gridSelection.value = rulesToShow.map((rule) => cellKey(rule.weekday, rule.startTime))
+  const first = rulesToShow[0]
+  Object.assign(
+    gridForm,
+    first
+      ? {
+          durationMinutes: first.durationMinutes,
+          serviceId: first.serviceId ?? '',
+          validFrom: first.validFrom ?? '',
+          validUntil: first.validUntil ?? '',
+          active: first.active
+        }
+      : emptyGridForm()
   )
+}
+
+function syncGridFromRules() {
+  if (editingGroupIds.value.length) return
+  applyProfileToGrid(bookableRules())
 }
 
 function handleError(caught: unknown, fallback: string) {
@@ -165,102 +300,129 @@ async function load() {
   } finally {
     loading.value = false
   }
+
+  syncGridFromRules()
 }
 
-function editRule(rule: AvailabilityRule) {
+function editGroup(group: RuleGroup) {
   actionError.value = ''
   fieldErrors.value = {}
-  const group = ruleGroupOf(rule)
-  editingRuleId.value = rule.id
-  editingGroupIds.value = group.map((item) => item.id)
-  Object.assign(ruleForm, {
-    weekdays: [...new Set(group.map((item) => String(item.weekday)))],
-    startTime: rule.startTime,
-    durationMinutes: rule.durationMinutes,
-    serviceId: rule.serviceId ?? '',
-    validFrom: rule.validFrom ?? '',
-    validUntil: rule.validUntil ?? '',
-    active: rule.active
-  })
+  editingGroupIds.value = group.rules.map((rule) => rule.id)
+  applyProfileToGrid(group.rules)
 }
 
-async function submitRule() {
+async function saveGrid() {
   actionError.value = ''
   fieldErrors.value = {}
 
-  const weekdays = [...new Set(ruleForm.weekdays.map(Number))].filter(
-    (value): value is Weekday => value >= 0 && value <= 6
+  if (!gridSelection.value.length && !editingGroupIds.value.length) {
+    fieldErrors.value = { grid: 'Selecciona al menos una hora del día.' }
+    return
+  }
+
+  const scoped = editingGroupIds.value.length
+    ? rules.value.filter((rule) => editingGroupIds.value.includes(rule.id))
+    : bookableRules()
+  const scopedIds = new Set(scoped.map((rule) => rule.id))
+  const desired = new Set(gridSelection.value)
+  const conflict = bookableRules().find(
+    (rule) =>
+      !scopedIds.has(rule.id) && desired.has(cellKey(rule.weekday, rule.startTime))
   )
-  if (!weekdays.length) {
-    fieldErrors.value = { weekday: 'Selecciona al menos un día.' }
+  if (conflict) {
+    fieldErrors.value = {
+      grid: `La hora ${conflict.startTime} del día ${WEEKDAY_LABELS[conflict.weekday]} pertenece a otro grupo.`
+    }
     return
   }
 
   const baseInput: Omit<AvailabilityRuleInput, 'weekday'> = {
-    startTime: ruleForm.startTime,
-    durationMinutes: Number(ruleForm.durationMinutes),
-    serviceId: ruleForm.serviceId || null,
-    validFrom: ruleForm.validFrom || null,
-    validUntil: ruleForm.validUntil || null,
-    active: ruleForm.active
+    startTime: '',
+    durationMinutes: Number(gridForm.durationMinutes),
+    serviceId: gridForm.serviceId || null,
+    validFrom: gridForm.validFrom || null,
+    validUntil: gridForm.validUntil || null,
+    active: gridForm.active
   }
 
   saving.value = true
   try {
-    const wasEditing = Boolean(editingRuleId.value)
-    if (wasEditing) {
-      const group = rules.value.filter((item) => editingGroupIds.value.includes(item.id))
-      for (const rule of group) {
-        if (weekdays.includes(rule.weekday)) {
-          await updateRule(rule.id, { ...baseInput, weekday: rule.weekday })
-        } else {
-          await deleteRule(rule.id)
-        }
-      }
-      for (const weekday of weekdays) {
-        if (!group.some((item) => item.weekday === weekday)) {
-          await createRule({ ...baseInput, weekday })
-        }
-      }
-    } else {
-      for (const weekday of weekdays) {
-        await createRule({ ...baseInput, weekday })
+    for (const rule of scoped) {
+      if (!desired.has(cellKey(rule.weekday, rule.startTime))) {
+        await deleteRule(rule.id)
       }
     }
 
-    const daysLabel = weekdays.map((weekday) => WEEKDAY_LABELS[weekday]).join(', ')
-    resetRuleForm()
-    emit(
-      'notice',
-      wasEditing
-        ? `Regla${weekdays.length > 1 ? 's' : ''} actualizada${weekdays.length > 1 ? 's' : ''} (${daysLabel}).`
-        : `Regla${weekdays.length > 1 ? 's' : ''} creada${weekdays.length > 1 ? 's' : ''} (${daysLabel}).`
+    const existingByCell = new Map(
+      scoped
+        .filter((rule) => desired.has(cellKey(rule.weekday, rule.startTime)))
+        .map((rule) => [cellKey(rule.weekday, rule.startTime), rule])
     )
+    for (const cell of desired) {
+      const separator = cell.indexOf(':')
+      const weekday = Number(cell.slice(0, separator)) as Weekday
+      const time = cell.slice(separator + 1)
+      const input: AvailabilityRuleInput = { ...baseInput, startTime: time, weekday }
+      const existing = existingByCell.get(cell)
+      if (!existing) {
+        await createRule(input)
+        continue
+      }
+      const unchanged =
+        existing.durationMinutes === input.durationMinutes &&
+        existing.serviceId === input.serviceId &&
+        existing.validFrom === input.validFrom &&
+        existing.validUntil === input.validUntil &&
+        existing.active === input.active
+      if (!unchanged) await updateRule(existing.id, input)
+    }
+
+    editingGroupIds.value = []
+    emit('notice', `Disponibilidad guardada (${desired.size} horarios).`)
     await load()
   } catch (caught) {
-    handleError(caught, 'No pudimos guardar la regla.')
+    handleError(caught, 'No pudimos guardar la disponibilidad.')
   } finally {
     saving.value = false
   }
 }
 
-async function removeRule(rule: AvailabilityRule) {
+async function removeGroup(group: RuleGroup) {
   actionError.value = ''
   fieldErrors.value = {}
 
   try {
-    await deleteRule(rule.id)
-    if (editingRuleId.value === rule.id) resetRuleForm()
-    emit('notice', 'Regla eliminada.')
+    for (const rule of group.rules) await deleteRule(rule.id)
+    if (group.rules.some((rule) => editingGroupIds.value.includes(rule.id))) {
+      editingGroupIds.value = []
+    }
+    emit('notice', `Grupo eliminado (${group.rules.length} reglas).`)
     await load()
   } catch (caught) {
-    handleError(caught, 'No pudimos eliminar la regla.')
+    handleError(caught, 'No pudimos eliminar las reglas.')
   }
 }
 
+async function removeOutOfRangeRules() {
+  actionError.value = ''
+  fieldErrors.value = {}
+  const total = outOfRangeRuleList.value.length
+
+  try {
+    for (const rule of outOfRangeRuleList.value) await deleteRule(rule.id)
+    emit('notice', `Se eliminaron ${total} reglas fuera de horario.`)
+    await load()
+  } catch (caught) {
+    handleError(caught, 'No pudimos eliminar las reglas fuera de horario.')
+  }
+}
 async function submitSlot() {
   actionError.value = ''
   fieldErrors.value = {}
+  if (!isBookableTime(slotForm.time)) {
+    fieldErrors.value = { time: OPENING_HOURS_MESSAGE }
+    return
+  }
   saving.value = true
 
   const input: ManualSlotInput = {
@@ -315,14 +477,26 @@ function ruleCoversDay(rule: AvailabilityRule, dateKey: string): boolean {
 }
 
 function dayStatus(dateKey: string): DayStatus {
-  const daySlots = manualSlots.value.filter((slot) => slot.slotKey.startsWith(`${dateKey}T`))
+  const prefix = `${dateKey}T`
+  const daySlots = manualSlots.value.filter(
+    (slot) => slot.slotKey.startsWith(prefix) && isBookableTime(slot.slotKey.slice(11))
+  )
 
-  if (bookings.value.some((item) => item.status === 'reserved' && item.slotKey.startsWith(`${dateKey}T`))) {
+  if (
+    bookings.value.some(
+      (item) =>
+        item.status === 'reserved' &&
+        item.slotKey.startsWith(prefix) &&
+        isBookableTime(item.slotKey.slice(11))
+    )
+  ) {
     return 'reserved'
   }
   if (daySlots.some((slot) => slot.blocked)) return 'blocked'
   if (daySlots.some((slot) => !slot.blocked)) return 'available'
-  if (rules.value.some((rule) => ruleCoversDay(rule, dateKey))) return 'available'
+  if (rules.value.some((rule) => ruleCoversDay(rule, dateKey) && isBookableTime(rule.startTime))) {
+    return 'available'
+  }
 
   return 'empty'
 }
@@ -353,7 +527,7 @@ function hoursForDay(dateKey: string): DayHour[] {
   const byKey = new Map<string, DayHour>()
 
   for (const rule of rules.value) {
-    if (!ruleCoversDay(rule, dateKey)) continue
+    if (!ruleCoversDay(rule, dateKey) || !isBookableTime(rule.startTime)) continue
     const slotKey = `${dateKey}T${rule.startTime}`
     byKey.set(slotKey, {
       slotKey,
@@ -365,7 +539,9 @@ function hoursForDay(dateKey: string): DayHour[] {
     })
   }
 
-  for (const slot of manualSlots.value.filter((item) => item.slotKey.startsWith(`${dateKey}T`))) {
+  for (const slot of manualSlots.value.filter(
+    (item) => item.slotKey.startsWith(`${dateKey}T`) && isBookableTime(item.slotKey.slice(11))
+  )) {
     const previous = byKey.get(slot.slotKey)
     byKey.set(slot.slotKey, {
       slotKey: slot.slotKey,
@@ -378,7 +554,13 @@ function hoursForDay(dateKey: string): DayHour[] {
   }
 
   for (const booking of bookings.value) {
-    if (booking.status !== 'reserved' || !booking.slotKey.startsWith(`${dateKey}T`)) continue
+    if (
+      booking.status !== 'reserved' ||
+      !booking.slotKey.startsWith(`${dateKey}T`) ||
+      !isBookableTime(booking.slotKey.slice(11))
+    ) {
+      continue
+    }
     const previous = byKey.get(booking.slotKey)
     byKey.set(booking.slotKey, {
       slotKey: booking.slotKey,
@@ -418,21 +600,15 @@ async function changeBlock(slotKey: string, blocked: boolean, notice: string) {
   }
 }
 
-function timeToMinutes(value: string): number {
-  const [hours, minutes] = value.split(':').map(Number)
-  return (hours ?? 0) * 60 + (minutes ?? 0)
-}
-
-function minutesToTime(value: number): string {
-  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
-}
-
 async function blockFrom(hour: DayHour) {
   const dateKey = selectedDay.value
   if (!dateKey) return
 
-  const fromMinutes = timeToMinutes(hour.time)
-  const untilMinutes = timeToMinutes(blockUntil.value)
+  const fromMinutes = Math.max(timeToMinutes(hour.time), timeToMinutes(APPOINTMENTS_FIRST_START))
+  const untilMinutes = Math.min(
+    timeToMinutes(blockUntil.value),
+    timeToMinutes(APPOINTMENTS_LAST_START)
+  )
   const step = hour.durationMinutes >= 15 ? hour.durationMinutes : 60
 
   if (untilMinutes <= fromMinutes) {
@@ -464,7 +640,7 @@ async function blockFrom(hour: DayHour) {
       }
     }
 
-    emit('notice', `Horarios bloqueados de ${hour.time} a ${blockUntil.value}.`)
+    emit('notice', `Horarios bloqueados de ${minutesToTime(fromMinutes)} a ${minutesToTime(untilMinutes)}.`)
     await load()
   } catch (caught) {
     handleError(caught, 'No pudimos bloquear los horarios.')
@@ -480,6 +656,10 @@ async function blockExtraHour() {
 
   actionError.value = ''
   fieldErrors.value = {}
+  if (!isBookableTime(time)) {
+    fieldErrors.value = { time: OPENING_HOURS_MESSAGE }
+    return
+  }
   saving.value = true
 
   try {
@@ -533,65 +713,48 @@ defineExpose({ load })
     </p>
 
     <template v-else>
-      <div class="mt-6 grid gap-6 lg:grid-cols-2">
-        <form class="space-y-4 rounded-xl border border-border bg-surface-alt p-4" @submit.prevent="submitRule">
-          <h3 class="font-display text-lg font-semibold text-accent">
-            {{ editingRuleId ? 'Editar regla' : 'Nueva regla semanal' }}
-          </h3>
-
-          <fieldset class="space-y-2">
-            <legend class="block font-body text-sm font-medium text-text">Días de la semana</legend>
-            <div class="flex flex-wrap gap-x-4 gap-y-2">
-              <label
-                v-for="(label, value) in WEEKDAY_LABELS"
-                :key="label"
-                class="flex items-center gap-1.5 font-body text-sm capitalize text-text"
-              >
-                <input
-                  v-model="ruleForm.weekdays"
-                  type="checkbox"
-                  :value="String(value)"
-                  class="h-4 w-4 accent-accent"
-                />
-                {{ label }}
-              </label>
-            </div>
-            <p class="font-body text-xs text-text-muted">Puedes elegir varios días para la misma regla.</p>
-            <p v-if="errorFor('weekday')" class="font-body text-sm text-red-500" role="alert">
-              {{ errorFor('weekday') }}
+      <form class="mt-6 rounded-xl border border-border bg-surface-alt p-4" @submit.prevent="saveGrid">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 class="font-display text-lg font-semibold text-accent">
+              {{ editingGroupIds.length ? 'Editar grupo de horarios' : 'Disponibilidad semanal' }}
+            </h3>
+            <p class="mt-1 font-body text-sm text-text-muted">
+              Marca las celdas de los días y horas que quieres publicar. Puedes seleccionar varias a la vez.
             </p>
-          </fieldset>
-
-          <div class="grid gap-4 sm:grid-cols-2">
-            <BaseInput
-              id="rule-start-time"
-              v-model="ruleForm.startTime"
-              label="Hora de inicio"
-              type="time"
-              required
-              :error="errorFor('startTime')"
-            />
-            <BaseInput
-              id="rule-duration"
-              :model-value="String(ruleForm.durationMinutes)"
-              label="Duración (minutos)"
-              type="number"
-              min="15"
-              max="480"
-              step="15"
-              required
-              :error="errorFor('durationMinutes')"
-              @update:model-value="ruleForm.durationMinutes = Number($event)"
-            />
           </div>
+          <p class="font-body text-xs text-text-muted">
+            Horario permitido: {{ APPOINTMENTS_FIRST_START }}–{{ APPOINTMENTS_LAST_START }}
+          </p>
+        </div>
 
-          <div class="space-y-2">
-            <label for="rule-service" class="block font-body text-sm font-medium text-text">
-              Servicio
-            </label>
+        <div class="mt-4 flex flex-wrap items-end gap-3">
+          <label class="flex items-center gap-2 font-body text-sm text-text">
+            Intervalo
             <select
-              id="rule-service"
-              v-model="ruleForm.serviceId"
+              v-model.number="gridStep"
+              class="rounded-md border border-border bg-surface px-2 py-2 font-body text-sm text-text focus:border-accent focus:outline-none"
+            >
+              <option :value="30">30 minutos</option>
+              <option :value="60">60 minutos</option>
+            </select>
+          </label>
+          <BaseInput
+            id="grid-duration"
+            :model-value="String(gridForm.durationMinutes)"
+            label="Duración (min)"
+            type="number"
+            min="15"
+            max="480"
+            step="15"
+            required
+            @update:model-value="gridForm.durationMinutes = Number($event)"
+          />
+          <div class="space-y-2">
+            <label for="grid-service" class="block font-body text-sm font-medium text-text">Servicio</label>
+            <select
+              id="grid-service"
+              v-model="gridForm.serviceId"
               class="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             >
               <option value="">Cualquier servicio</option>
@@ -599,43 +762,117 @@ defineExpose({ load })
                 {{ service.name }}
               </option>
             </select>
-            <p v-if="errorFor('serviceId')" class="font-body text-sm text-red-500" role="alert">
-              {{ errorFor('serviceId') }}
-            </p>
           </div>
-
-          <div class="grid gap-4 sm:grid-cols-2">
-            <BaseInput
-              id="rule-valid-from"
-              v-model="ruleForm.validFrom"
-              label="Vigente desde"
-              type="date"
-              :error="errorFor('validFrom')"
-            />
-            <BaseInput
-              id="rule-valid-until"
-              v-model="ruleForm.validUntil"
-              label="Vigente hasta"
-              type="date"
-              :error="errorFor('validUntil')"
-            />
-          </div>
-
-          <label class="flex items-center gap-2 font-body text-sm text-text">
-            <input v-model="ruleForm.active" type="checkbox" class="h-4 w-4 accent-accent" />
-            Regla activa
+          <BaseInput
+            id="grid-valid-from"
+            v-model="gridForm.validFrom"
+            label="Vigente desde"
+            type="date"
+          />
+          <BaseInput
+            id="grid-valid-until"
+            v-model="gridForm.validUntil"
+            label="Vigente hasta"
+            type="date"
+          />
+          <label class="flex items-center gap-2 pb-2 font-body text-sm text-text">
+            <input v-model="gridForm.active" type="checkbox" class="h-4 w-4 accent-accent" />
+            Publicar
           </label>
+        </div>
 
-          <div class="flex flex-wrap gap-3">
-            <BaseButton type="submit" size="sm" :loading="saving">
-              {{ editingRuleId ? 'GUARDAR REGLA' : 'CREAR REGLA' }}
-            </BaseButton>
-            <BaseButton v-if="editingRuleId" type="button" variant="ghost" size="sm" @click="resetRuleForm">
-              Cancelar
-            </BaseButton>
-          </div>
-        </form>
+        <p v-if="errorFor('grid')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('grid') }}
+        </p>
+        <p v-if="errorFor('startTime')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('startTime') }}
+        </p>
+        <p v-if="errorFor('durationMinutes')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('durationMinutes') }}
+        </p>
+        <p v-if="errorFor('serviceId')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('serviceId') }}
+        </p>
+        <p v-if="errorFor('validFrom')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('validFrom') }}
+        </p>
+        <p v-if="errorFor('validUntil')" class="mt-3 font-body text-sm text-red-500" role="alert">
+          {{ errorFor('validUntil') }}
+        </p>
 
+        <div class="mt-5 overflow-x-auto">
+          <table class="w-full border-collapse text-center font-body text-sm">
+            <caption class="sr-only">Cuadrícula de disponibilidad semanal por día y hora</caption>
+            <thead>
+              <tr class="border-b border-border text-text-muted">
+                <th scope="col" class="px-2 py-2 text-left font-semibold">Hora</th>
+                <th
+                  v-for="weekday in CALENDAR_WEEKDAYS"
+                  :key="weekday"
+                  scope="col"
+                  class="px-2 py-2 font-semibold capitalize"
+                >
+                  {{ WEEKDAY_LABELS_SHORT[weekday] }}
+                  <button
+                    type="button"
+                    class="block mx-auto text-xs font-normal text-accent hover:underline"
+                    :aria-label="`Seleccionar todas las horas del ${WEEKDAY_LABELS[weekday]}`"
+                    @click="selectColumn(weekday)"
+                  >
+                    Todo
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="time in gridTimes" :key="time" class="border-b border-border/60">
+                <th scope="row" class="px-2 py-1 text-left font-normal text-text">
+                  {{ time }}
+                  <button
+                    type="button"
+                    class="ml-2 text-xs text-accent hover:underline"
+                    :aria-label="`Seleccionar ${time} en todos los días`"
+                    @click="selectRow(time)"
+                  >
+                    Todos
+                  </button>
+                </th>
+                <td v-for="weekday in CALENDAR_WEEKDAYS" :key="`${weekday}-${time}`" class="px-2 py-1">
+                  <input
+                    type="checkbox"
+                    :checked="isSelected(weekday, time)"
+                    :aria-label="`${WEEKDAY_LABELS[weekday]} ${time}`"
+                    class="h-4 w-4 accent-accent"
+                    @change="toggleCell(weekday, time)"
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="mt-3 font-body text-xs text-text-muted">
+          {{ gridSelection.length }} horarios seleccionados. Los cambios se aplican al guardar.
+        </p>
+
+        <div class="mt-4 flex flex-wrap gap-3">
+          <BaseButton type="submit" size="sm" :loading="saving">GUARDAR DISPONIBILIDAD</BaseButton>
+          <BaseButton type="button" variant="secondary" size="sm" @click="clearGrid">
+            LIMPIAR SELECCIÓN
+          </BaseButton>
+          <BaseButton
+            v-if="editingGroupIds.length"
+            type="button"
+            variant="ghost"
+            size="sm"
+            @click="cancelGridEdit"
+          >
+            Cancelar
+          </BaseButton>
+        </div>
+      </form>
+
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
         <form class="space-y-4 rounded-xl border border-border bg-surface-alt p-4" @submit.prevent="submitSlot">
           <h3 class="font-display text-lg font-semibold text-accent">Horario individual</h3>
 
@@ -703,14 +940,40 @@ defineExpose({ load })
         {{ actionError }}
       </p>
 
-      <h3 class="mt-8 font-display text-lg font-semibold text-accent">Reglas publicadas</h3>
-      <div v-if="rules.length" class="mt-3 overflow-x-auto">
+      <div class="mt-8 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 class="font-display text-lg font-semibold text-accent">Reglas publicadas</h3>
+          <p class="mt-1 font-body text-sm text-text-muted">
+            {{ rules.length }} reglas agrupadas en {{ ruleGroups.length }}
+            {{ ruleGroups.length === 1 ? 'bloque' : 'bloques' }} con igual duración, servicio y vigencia.
+          </p>
+        </div>
+      </div>
+
+      <div
+        v-if="outOfRangeRuleList.length"
+        class="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3"
+        role="alert"
+      >
+        <p class="font-body text-sm text-text">
+          Hay {{ outOfRangeRuleList.length }}
+          {{ outOfRangeRuleList.length === 1 ? 'regla antigua' : 'reglas antiguas' }} fuera del horario
+          permitido ({{ APPOINTMENTS_FIRST_START }}–{{ APPOINTMENTS_LAST_START }}):
+          {{ outOfRangeRuleList.map((rule) => `${WEEKDAY_LABELS[rule.weekday]} ${rule.startTime}`).join(', ') }}.
+          No se muestran en el calendario público.
+        </p>
+        <BaseButton type="button" size="sm" class="mt-3" @click="removeOutOfRangeRules">
+          ELIMINAR REGLAS FUERA DE HORARIO
+        </BaseButton>
+      </div>
+
+      <div v-if="ruleGroups.length" class="mt-3 overflow-x-auto">
         <table class="w-full border-collapse text-left font-body text-sm">
-          <caption class="sr-only">Reglas de disponibilidad</caption>
+          <caption class="sr-only">Bloques de reglas de disponibilidad</caption>
           <thead>
             <tr class="border-b border-border text-text-muted">
-              <th scope="col" class="px-2 py-2 font-semibold">Día</th>
-              <th scope="col" class="px-2 py-2 font-semibold">Hora</th>
+              <th scope="col" class="px-2 py-2 font-semibold">Días</th>
+              <th scope="col" class="px-2 py-2 font-semibold">Horas</th>
               <th scope="col" class="px-2 py-2 font-semibold">Duración</th>
               <th scope="col" class="px-2 py-2 font-semibold">Servicio</th>
               <th scope="col" class="px-2 py-2 font-semibold">Vigencia</th>
@@ -719,21 +982,27 @@ defineExpose({ load })
             </tr>
           </thead>
           <tbody>
-            <tr v-for="rule in rules" :key="rule.id" class="border-b border-border/60">
-              <td class="px-2 py-2 capitalize text-text">{{ WEEKDAY_LABELS[rule.weekday] }}</td>
-              <td class="px-2 py-2 text-text">{{ rule.startTime }}</td>
-              <td class="px-2 py-2 text-text">{{ rule.durationMinutes }} min</td>
-              <td class="px-2 py-2 text-text">{{ serviceName(rule.serviceId) }}</td>
-              <td class="px-2 py-2 text-text-muted">
-                {{ rule.validFrom ?? '—' }} a {{ rule.validUntil ?? 'sin límite' }}
+            <tr v-for="group in ruleGroups" :key="group.key" class="border-b border-border/60">
+              <td class="px-2 py-2 text-text">
+                <span v-for="weekday in group.weekdays" :key="weekday" class="mr-1">
+                  {{ WEEKDAY_LABELS_SHORT[weekday] }}
+                </span>
               </td>
-              <td class="px-2 py-2 text-text">{{ rule.active ? 'Activa' : 'Inactiva' }}</td>
+              <td class="px-2 py-2 text-text" :title="group.times.join(', ')">
+                {{ group.times.join(', ') }}
+              </td>
+              <td class="px-2 py-2 text-text">{{ group.durationMinutes }} min</td>
+              <td class="px-2 py-2 text-text">{{ serviceName(group.serviceId) }}</td>
+              <td class="px-2 py-2 text-text-muted">
+                {{ group.validFrom ?? '—' }} a {{ group.validUntil ?? 'sin límite' }}
+              </td>
+              <td class="px-2 py-2 text-text">{{ group.active ? 'Activa' : 'Inactiva' }}</td>
               <td class="px-2 py-2">
                 <div class="flex flex-wrap gap-2">
-                  <BaseButton type="button" variant="secondary" size="sm" @click="editRule(rule)">
+                  <BaseButton type="button" variant="secondary" size="sm" @click="editGroup(group)">
                     Editar
                   </BaseButton>
-                  <BaseButton type="button" variant="ghost" size="sm" @click="removeRule(rule)">
+                  <BaseButton type="button" variant="ghost" size="sm" @click="removeGroup(group)">
                     Eliminar
                   </BaseButton>
                 </div>
@@ -745,7 +1014,10 @@ defineExpose({ load })
       <p v-else class="mt-3 font-body text-sm text-text-muted">Aún no hay reglas publicadas.</p>
 
       <h3 class="mt-8 font-display text-lg font-semibold text-accent">Horarios individuales</h3>
-      <div v-if="manualSlots.length" class="mt-3 overflow-x-auto">
+      <p class="mt-1 font-body text-sm text-text-muted">
+        Solo muestra los horarios que agregaste manualmente. Los generados por reglas se editan en el calendario.
+      </p>
+      <div v-if="individualSlots.length" class="mt-3 overflow-x-auto">
         <table class="w-full border-collapse text-left font-body text-sm">
           <caption class="sr-only">Horarios individuales y bloqueos</caption>
           <thead>
@@ -758,7 +1030,7 @@ defineExpose({ load })
             </tr>
           </thead>
           <tbody>
-            <tr v-for="slot in manualSlots" :key="slot.id" class="border-b border-border/60">
+            <tr v-for="slot in individualSlots" :key="slot.id" class="border-b border-border/60">
               <td class="px-2 py-2 text-text">{{ formatAppointmentDate(slot.slotKey) }}</td>
               <td class="px-2 py-2 text-text">{{ slot.slotKey.slice(11) }}</td>
               <td class="px-2 py-2 text-text">{{ serviceName(slot.serviceId) }}</td>

@@ -118,60 +118,76 @@ describe('AdminAvailabilityEditor', () => {
   it('carga reglas y horarios y marca el calendario', async () => {
     render(AdminAvailabilityEditor)
 
-    await waitFor(() => expect(screen.getAllByText('lunes').length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'lunes 10:00' })).toBeChecked()
+    )
     expect(screen.getAllByText('Hipnosis Regresiva').length).toBeGreaterThan(0)
     expect(screen.getByText('Bloqueado')).toBeInTheDocument()
     expect(screen.getByLabelText(/con citas reservadas/)).toBeInTheDocument()
     expect(screen.getByLabelText(/con horarios bloqueados/)).toBeInTheDocument()
   })
 
-  it('da de alta una regla semanal con el servicio elegido', async () => {
+  it('publica una hora desde la cuadrícula con el servicio elegido', async () => {
+    vi.mocked(listRules).mockResolvedValue([])
     const { emitted } = render(AdminAvailabilityEditor)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'CREAR REGLA' })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'miércoles 11:00' })).toBeInTheDocument()
+    )
 
-    await userEvent.click(screen.getByLabelText('lunes'))
-    await userEvent.click(screen.getByLabelText('miércoles'))
-    await fireEvent.update(screen.getByLabelText('Hora de inicio'), '11:30')
-    await fireEvent.update(screen.getAllByLabelText('Duración (minutos)')[0], '90')
+    await userEvent.click(screen.getByRole('checkbox', { name: 'miércoles 11:00' }))
+    await fireEvent.update(screen.getByLabelText('Duración (min)'), '90')
     await fireEvent.update(screen.getAllByLabelText('Servicio')[0], 'hipnosis-regresiva')
-    await userEvent.click(screen.getByRole('button', { name: 'CREAR REGLA' }))
+    await userEvent.click(screen.getByRole('button', { name: 'GUARDAR DISPONIBILIDAD' }))
 
     await waitFor(() => expect(createRule).toHaveBeenCalledTimes(1))
     expect(createRule).toHaveBeenCalledWith(
       expect.objectContaining({
         weekday: 3,
-        startTime: '11:30',
+        startTime: '11:00',
         durationMinutes: 90,
         serviceId: 'hipnosis-regresiva',
         active: true
       })
     )
-    expect(emitted().notice).toEqual([['Regla creada (miércoles).']])
+    expect(emitted().notice).toEqual([['Disponibilidad guardada (1 horarios).']])
   })
 
-  it('crea una regla para varios días a la vez', async () => {
+  it('selecciona horas y días completos en bloque', async () => {
+    vi.mocked(listRules).mockResolvedValue([])
     const { emitted } = render(AdminAvailabilityEditor)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'CREAR REGLA' })).toBeInTheDocument())
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Seleccionar todas las horas del martes' })
+      ).toBeInTheDocument()
+    )
 
-    await userEvent.click(screen.getByLabelText('martes'))
-    await userEvent.click(screen.getByLabelText('viernes'))
-    await userEvent.click(screen.getByRole('button', { name: 'CREAR REGLA' }))
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Seleccionar todas las horas del martes' })
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Seleccionar 14:00 en todos los días' })
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'GUARDAR DISPONIBILIDAD' }))
 
-    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(3))
-    expect(vi.mocked(createRule).mock.calls.map(([input]) => input.weekday)).toEqual([1, 2, 5])
-    expect(emitted().notice).toEqual([['Reglas creadas (lunes, martes, viernes).']])
+    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(23))
+    expect(vi.mocked(createRule).mock.calls.map(([input]) => input.weekday)).toContain(2)
+    expect(vi.mocked(createRule).mock.calls.map(([input]) => input.startTime)).toContain('14:00')
+    expect(emitted().notice).toEqual([['Disponibilidad guardada (23 horarios).']])
   })
 
-  it('edita y elimina una regla', async () => {
+  it('edita y elimina un bloque de reglas', async () => {
     render(AdminAvailabilityEditor)
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Editar' }).length).toBe(1))
 
     await userEvent.click(screen.getByRole('button', { name: 'Editar' }))
-    expect(screen.getByRole('heading', { name: 'Editar regla' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Hora de inicio')).toHaveValue('10:00')
+    expect(screen.getByRole('heading', { name: 'Editar grupo de horarios' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'lunes 10:00' })).toBeChecked()
 
-    await userEvent.click(screen.getByRole('button', { name: 'GUARDAR REGLA' }))
-    await waitFor(() => expect(updateRule).toHaveBeenCalledWith('rule-1', expect.anything()))
+    await userEvent.click(screen.getByRole('checkbox', { name: 'martes 10:00' }))
+    await userEvent.click(screen.getByRole('button', { name: 'GUARDAR DISPONIBILIDAD' }))
+    await waitFor(() =>
+      expect(createRule).toHaveBeenCalledWith(expect.objectContaining({ weekday: 2, startTime: '10:00' }))
+    )
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0])
     await waitFor(() => expect(deleteRule).toHaveBeenCalledWith('rule-1'))
@@ -183,11 +199,42 @@ describe('AdminAvailabilityEditor', () => {
     )
     render(AdminAvailabilityEditor)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'CREAR REGLA' })).toBeInTheDocument())
-    await userEvent.click(screen.getByRole('button', { name: 'CREAR REGLA' }))
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'lunes 11:00' })).toBeInTheDocument()
+    )
+    await userEvent.click(screen.getByRole('checkbox', { name: 'lunes 11:00' }))
+    await userEvent.click(screen.getByRole('button', { name: 'GUARDAR DISPONIBILIDAD' }))
 
     await waitFor(() => expect(screen.getByText('La hora no es válida.')).toBeInTheDocument())
     expect(screen.getByText('Regla inválida.')).toBeInTheDocument()
+  })
+
+  it('oculta las reglas antiguas a medianoche y permite borrarlas', async () => {
+    const phantom: AvailabilityRule = { ...rule, id: 'phantom', weekday: 2, startTime: '00:00' }
+    vi.mocked(listRules).mockResolvedValue([rule, phantom])
+    render(AdminAvailabilityEditor)
+
+    await waitFor(() => expect(screen.getByText(/regla antigua fuera del horario/)).toBeInTheDocument())
+    expect(screen.queryByRole('checkbox', { name: 'martes 00:00' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('cell', { name: '00:00' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'ELIMINAR REGLAS FUERA DE HORARIO' }))
+    await waitFor(() => expect(deleteRule).toHaveBeenCalledWith('phantom'))
+  })
+
+  it('resume 40 reglas en un solo bloque', async () => {
+    const many: AvailabilityRule[] = Array.from({ length: 40 }, (_, index) => ({
+      ...rule,
+      id: `regla-${index}`,
+      weekday: ((index % 5) + 1) as AvailabilityRule['weekday'],
+      startTime: `${String(10 + Math.floor(index / 5)).padStart(2, '0')}:00`
+    }))
+    vi.mocked(listRules).mockResolvedValue(many)
+    render(AdminAvailabilityEditor)
+
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Editar' })).toHaveLength(1))
+    expect(screen.getByText(/10:00, 11:00, 12:00/)).toBeInTheDocument()
+    expect(screen.getByText(/40 reglas agrupadas en 1 bloque/)).toBeInTheDocument()
   })
 
   it('agrega y bloquea horarios individuales', async () => {
