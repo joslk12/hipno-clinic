@@ -27,4 +27,4 @@
 - [x] 4.1 `npm run typecheck`, `npm run lint` (0 errores, 2 warnings `v-html` previos), `npm test` (323 pruebas) y `npm run build`.
 - [x] 4.2 `CI=1 npx playwright test` (94 pruebas E2E).
 - [x] 4.3 `npx openspec validate improve-appointment-calendar --strict` (válido con INFO de spec base ausente).
-- [ ] 4.4 Commitear, pushear, redesplegar en Netlify y validar `/admin/citas`, `/contacto` y los endpoints en producción.
+- [x] 4.4 Commitear (`ea8d29a`, `bbec654`), pushear, redesplegar en Netlify y validar `/admin/citas`, `/contacto` y los endpoints en producción: 50 horarios publicados, ninguno a las `00:00`, bundle de la cuadrícula presente y sitemap restaurado.
