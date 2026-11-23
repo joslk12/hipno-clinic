@@ -44,9 +44,15 @@ export interface BlogPostMutationResult {
   build: BuildResult
 }
 
+export interface ImageCleanupResult {
+  deleted: number
+  warning?: string
+}
+
 export interface BlogDeleteResult {
   ok: true
   build: BuildResult
+  images: ImageCleanupResult
 }
 
 export interface AdminPostsResponse {

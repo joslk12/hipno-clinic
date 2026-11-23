@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import type {
+  BlogDeleteResult,
   BlogPostMutationResult,
   BlogPostRecord,
   BlogStatus
@@ -24,7 +25,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   saved: [result: BlogPostMutationResult]
-  deleted: [post: BlogPostRecord]
+  deleted: [post: BlogPostRecord, result: BlogDeleteResult]
   cancel: []
   unauthorized: []
 }>()
@@ -144,8 +145,8 @@ async function remove() {
   actionError.value = ''
 
   try {
-    await deletePost(props.post.id)
-    emit('deleted', props.post)
+    const result = await deletePost(props.post.id)
+    emit('deleted', props.post, result)
   } catch (caught) {
     if (caught instanceof AdminBlogApiError) {
       actionError.value = caught.message

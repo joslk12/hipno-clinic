@@ -7,6 +7,7 @@ import type {
   BlogPostRecord,
   BlogStatus,
   BuildResult,
+  ImageCleanupResult,
   PublicBlogPost
 } from '../../../src/types/blog'
 import {
@@ -32,6 +33,7 @@ import {
 import {
   imageUrl,
   isValidImageKey,
+  postImageKeys,
   validateImageFile,
   type UploadedImageFile
 } from './images'
@@ -102,6 +104,32 @@ async function buildForChange(
 ): Promise<BuildResult> {
   if (!shouldTriggerBuild(previous, next)) return { triggered: false }
   return triggerBuild(deps.env.buildHookUrl, fetchImpl(deps))
+}
+
+/** Borra las imágenes del artículo sin revertir su eliminación si Blobs falla. */
+async function deletePostImages(store: BlogStore, keys: string[]): Promise<ImageCleanupResult> {
+  const deleted: string[] = []
+  const failed: string[] = []
+
+  for (const key of keys) {
+    try {
+      await store.deleteImage(key)
+      deleted.push(key)
+    } catch {
+      failed.push(key)
+    }
+  }
+
+  return {
+    deleted: deleted.length,
+    ...(failed.length > 0
+      ? {
+          warning: `No se pudieron eliminar ${failed.length} ${
+            failed.length === 1 ? 'imagen' : 'imágenes'
+          } del artículo.`
+        }
+      : {})
+  }
 }
 
 function toPublicPost(post: BlogPostRecord): PublicBlogPost {
@@ -289,9 +317,20 @@ export function createAdminPostsHandler(deps: HandlerDeps) {
       const existing = await deps.store.getPost(id)
       if (!existing) return errorResponse(404, 'Artículo no encontrado.')
 
+      const keys = postImageKeys(existing)
+      const keysInOtherPosts = new Set(
+        (await deps.store.listPosts())
+          .filter((item) => item.id !== id)
+          .flatMap(postImageKeys)
+      )
+
       await deps.store.deletePost(id)
+      const images = await deletePostImages(
+        deps.store,
+        keys.filter((key) => !keysInOtherPosts.has(key))
+      )
       const build = await buildForChange(deps, existing, null)
-      return adminJson({ ok: true, build } satisfies BlogDeleteResult)
+      return adminJson({ ok: true, build, images } satisfies BlogDeleteResult)
     }
 
     return methodNotAllowed('GET, POST, PATCH, DELETE')

@@ -1,3 +1,5 @@
+import type { BlogPostRecord } from '../../../src/types/blog'
+
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 
 export const ALLOWED_IMAGE_TYPES = [
@@ -88,4 +90,26 @@ export function isValidImageKey(key: string | null): key is string {
 
 export function imageUrl(key: string): string {
   return `/api/blog/images?key=${key}`
+}
+
+const IMAGE_URL_PATTERN = /\/api\/blog\/images\?key=(image:[A-Za-z0-9-]+)/g
+
+/** Extrae las claves de imagen propias del blog presentes en uno o varios textos. */
+export function imageKeysFromText(...texts: Array<string | null | undefined>): string[] {
+  const keys = new Set<string>()
+
+  for (const text of texts) {
+    if (typeof text !== 'string') continue
+    for (const match of text.matchAll(IMAGE_URL_PATTERN)) {
+      const key = match[1] ?? null
+      if (isValidImageKey(key)) keys.add(key)
+    }
+  }
+
+  return [...keys]
+}
+
+/** Todas las imágenes que un artículo referencia, incluida la portada. */
+export function postImageKeys(post: BlogPostRecord): string[] {
+  return imageKeysFromText(post.coverImage, post.contentMarkdown, post.contentHtml)
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { BlogPostRecord } from '../../../../src/types/blog'
+import type { BlogDeleteResult, BlogPostRecord } from '../../../../src/types/blog'
 import { createSessionToken } from '../auth'
 import {
   createAdminBuildHandler,
@@ -66,6 +66,13 @@ function input(overrides: Record<string, unknown> = {}) {
 
 function okFetch() {
   return vi.fn(async () => new Response(null, { status: 200 })) as unknown as typeof fetch
+}
+
+function imageRecord() {
+  return {
+    data: new Uint8Array([1, 2, 3]).buffer,
+    metadata: { contentType: 'image/png' }
+  }
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -218,6 +225,69 @@ describe('blog handlers', () => {
     expect(remove.status).toBe(200)
     expect(await store.getPost('draft')).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('elimina las imágenes del artículo y conserva las que usa otro artículo', async () => {
+    const target = post({
+      id: 'borrar',
+      coverImage: '/api/blog/images?key=image:portada',
+      contentMarkdown: '![cuerpo](/api/blog/images?key=image:cuerpo)',
+      contentHtml: '<img src="/api/blog/images?key=image:cuerpo" />'
+    })
+    const other = post({
+      id: 'otro',
+      slug: 'otro',
+      coverImage: '/api/blog/images?key=image:portada'
+    })
+    const store = createMemoryBlogStore({
+      posts: [target, other],
+      images: [
+        ['image:portada', imageRecord()],
+        ['image:cuerpo', imageRecord()],
+        ['image:ajena', imageRecord()]
+      ]
+    })
+    const handler = createAdminPostsHandler({ store, env, now, fetchImpl: okFetch() })
+
+    const response = await handler(
+      adminRequest('/api/admin/blog/posts?id=borrar', { method: 'DELETE' })
+    )
+    expect(response.status).toBe(200)
+    expect(await store.getPost('borrar')).toBeNull()
+    expect(await store.getImage('image:cuerpo')).toBeNull()
+    expect(await store.getImage('image:portada')).not.toBeNull()
+    expect(await store.getImage('image:ajena')).not.toBeNull()
+    expect((await json<BlogDeleteResult>(response)).images).toEqual({ deleted: 1 })
+  })
+
+  it('avisa si falla la limpieza de imágenes sin revertir el borrado', async () => {
+    const target = post({
+      id: 'borrar',
+      coverImage: '/api/blog/images?key=image:portada',
+      contentMarkdown: '![cuerpo](/api/blog/images?key=image:cuerpo)'
+    })
+    const store = createMemoryBlogStore({
+      posts: [target],
+      images: [
+        ['image:portada', imageRecord()],
+        ['image:cuerpo', imageRecord()]
+      ]
+    })
+    const original = store.deleteImage.bind(store)
+    vi.spyOn(store, 'deleteImage').mockImplementation(async (key) => {
+      if (key === 'image:cuerpo') throw new Error('Blobs no disponible')
+      await original(key)
+    })
+    const handler = createAdminPostsHandler({ store, env, now, fetchImpl: okFetch() })
+
+    const response = await handler(
+      adminRequest('/api/admin/blog/posts?id=borrar', { method: 'DELETE' })
+    )
+    const body = await json<BlogDeleteResult>(response)
+    expect(await store.getPost('borrar')).toBeNull()
+    expect(await store.getImage('image:portada')).toBeNull()
+    expect(body.images.deleted).toBe(1)
+    expect(body.images.warning).toContain('No se pudieron eliminar 1 imagen')
   })
 
   it('lista artículos para administración y publica solo los publicados', async () => {

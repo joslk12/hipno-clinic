@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import type { BlogPostMutationResult, BlogPostRecord } from '../../types/blog'
+import type {
+  BlogDeleteResult,
+  BlogPostMutationResult,
+  BlogPostRecord
+} from '../../types/blog'
 import { AdminBlogApiError, deletePost, getSession, listPosts, logout, rebuildSite } from '../../services/adminBlog'
 import { usePageMeta } from '../../composables/usePageMeta'
 import AdminLogin from '../../components/admin/AdminLogin.vue'
@@ -105,11 +109,29 @@ function handleSaved(result: BlogPostMutationResult) {
       : 'Artículo guardado.'
 }
 
-function handleDeleted(post: BlogPostRecord) {
+function deleteNotice(result?: BlogDeleteResult): string {
+  let message = 'Artículo eliminado.'
+  if (result?.build.triggered) {
+    message = 'Artículo eliminado. La reconstrucción del sitio está en curso.'
+  } else if (result?.build.warning) {
+    message = `Artículo eliminado. ${result.build.warning}`
+  }
+
+  const images = result?.images
+  if (images?.warning) return `${message} ${images.warning}`
+  if (images?.deleted) {
+    return `${message} Se eliminaron ${images.deleted} ${
+      images.deleted === 1 ? 'imagen' : 'imágenes'
+    }.`
+  }
+  return message
+}
+
+function handleDeleted(post: BlogPostRecord, result?: BlogDeleteResult) {
   posts.value = posts.value.filter((item) => item.id !== post.id)
   editing.value = undefined
   actionError.value = ''
-  notice.value = 'Artículo eliminado.'
+  notice.value = deleteNotice(result)
 }
 
 async function handleDelete(post: BlogPostRecord) {
@@ -119,12 +141,7 @@ async function handleDelete(post: BlogPostRecord) {
 
   try {
     const result = await deletePost(post.id)
-    handleDeleted(post)
-    if (result.build.triggered) {
-      notice.value = 'Artículo eliminado. La reconstrucción del sitio está en curso.'
-    } else if (result.build.warning) {
-      notice.value = `Artículo eliminado. ${result.build.warning}`
-    }
+    handleDeleted(post, result)
   } catch (caught) {
     handleApiError(caught, 'No pudimos eliminar el artículo.')
   }

@@ -99,7 +99,7 @@ async function mockAdminApi(page: Page, options: MockOptions = {}) {
           excerpt: String(body.excerpt),
           contentMarkdown: String(body.contentMarkdown),
           contentHtml: '<h2>Primera sección</h2><p>Contenido de prueba.</p>',
-          coverImage: null,
+          coverImage: typeof body.coverImage === 'string' ? body.coverImage : null,
           status: body.status === 'published' ? 'published' : 'draft',
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -129,6 +129,9 @@ async function mockAdminApi(page: Page, options: MockOptions = {}) {
         post.excerpt = String(body.excerpt ?? post.excerpt)
         post.contentMarkdown = String(body.contentMarkdown ?? post.contentMarkdown)
         post.contentHtml = '<h2>Primera sección</h2><p>Contenido actualizado.</p>'
+        if (body.coverImage === null || typeof body.coverImage === 'string') {
+          post.coverImage = body.coverImage
+        }
         post.status = body.status === 'published' ? 'published' : 'draft'
         post.updatedAt = new Date().toISOString()
         if (post.status === 'published' && !post.publishedAt) {
@@ -148,11 +151,23 @@ async function mockAdminApi(page: Page, options: MockOptions = {}) {
       if (method === 'DELETE') {
         const id = url.searchParams.get('id')
         const index = posts.findIndex((item) => item.id === id)
+        const removed = posts[index]
+        const keys = new Set<string>()
+        for (const text of [removed?.coverImage, removed?.contentMarkdown, removed?.contentHtml]) {
+          if (typeof text !== 'string') continue
+          for (const match of text.matchAll(/\/api\/blog\/images\?key=(image:[A-Za-z0-9-]+)/g)) {
+            if (match[1]) keys.add(match[1])
+          }
+        }
         if (index >= 0) posts.splice(index, 1)
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ ok: true, build: { triggered: true } })
+          body: JSON.stringify({
+            ok: true,
+            build: { triggered: true },
+            images: { deleted: keys.size }
+          })
         })
         return
       }
@@ -235,4 +250,34 @@ test('permite iniciar sesión, crear, previsualizar, publicar, reconstruir y sal
 
   await page.getByRole('button', { name: 'Cerrar sesión' }).click()
   await expect(page.getByRole('heading', { level: 1, name: 'Panel de administrador' })).toBeVisible()
+})
+
+test('informa de la limpieza de imágenes al eliminar un artículo', async ({ page }) => {
+  await mockAdminApi(page)
+  await page.goto('/admin/blog')
+
+  await page.getByLabel('Contraseña').fill('clave-segura')
+  await page.getByRole('button', { name: 'Entrar' }).click()
+  await page.getByRole('button', { name: 'Nuevo artículo' }).click()
+
+  await page.getByRole('textbox', { name: 'Título', exact: true }).fill('Artículo con imágenes')
+  await page.getByLabel('Resumen').fill(
+    'Un resumen suficientemente largo para cumplir con la validación del blog.'
+  )
+  await page.getByLabel('Contenido').fill(
+    '![cuerpo](/api/blog/images?key=image:cuerpo)\n\nEste es un contenido suficientemente largo para validar el artículo.'
+  )
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: 'portada.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  })
+  await page.getByRole('button', { name: 'Guardar borrador' }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Artículos del blog' })).toBeVisible()
+
+  page.on('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Eliminar' }).click()
+
+  await expect(page.getByText(/Se eliminaron 2 imágenes\.$/)).toBeVisible()
+  await expect(page.getByText('Aún no hay artículos')).toBeVisible()
 })
