@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:netlify": "npx netlify-cli dev",
+    "db:setup": "node scripts/setup-db.mjs",
     "deploy": "npx netlify-cli deploy --build --prod",
     "prebuild": "node scripts/generate-blog-data.mjs && node scripts/generate-sitemap.mjs",
     "postbuild": "node scripts/check-contact.mjs && node scripts/check-seo.mjs"

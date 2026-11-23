@@ -7,7 +7,8 @@ export type DbRow = Record<string, unknown>
 /** Subconjunto de la API de Neon que usan los repositorios. */
 export interface Sql {
   (strings: TemplateStringsArray, ...values: unknown[]): Promise<DbRow[]>
-  (query: string, params?: unknown[]): Promise<DbRow[]>
+  /** Consultas SQL sin interpolación (por ejemplo, DDL idempotente). */
+  query(query: string, params?: unknown[]): Promise<DbRow[]>
 }
 
 export type SqlProvider = () => Promise<Sql>
@@ -35,7 +36,7 @@ export async function initializeDatabase(): Promise<Sql> {
 
   const sql = neon(value) as unknown as Sql
   for (const statement of SCHEMA_STATEMENTS) {
-    await sql(statement)
+    await sql.query(statement)
   }
   await migrateFromBlobs(sql)
   return sql

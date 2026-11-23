@@ -53,6 +53,14 @@ El envío de WhatsApp de invitaciones es manual: desde `/admin/resenas` se gener
 
 `DATABASE_URL` apunta a Netlify DB (Postgres/Neon). Al primer arranque en frío se crean las tablas `blog_posts`, `review_clients`, `availability_rules`, `schedule_slots`, `appointments` y `migration_state`, y se copian una sola vez los artículos (`post:`) y las clientas (`client:`) que ya existían en Blobs. Las imágenes (`image:`) no se migran: siguen sirviéndose desde `/api/blog/images?key=...`.
 
+Las sentencias DDL también están en `netlify/lib/db/schema.sql` para ejecutarlas manualmente. Si ya configuraste `DATABASE_URL`, puedes crear/verificar las tablas sin esperar al arranque de las Functions:
+
+```bash
+npm run db:setup
+```
+
+El script lee `DATABASE_URL` (o `NETLIFY_DATABASE_URL`) del entorno, aplica cada sentencia con `sql.query(...)` y es idempotente. Si prefieres otro cliente, ejecuta directamente `netlify/lib/db/schema.sql` en el editor SQL de Neon; no hace falta insertar la marca de migración: la primera Function que arranque copiará los datos desde Blobs.
+
 Si no hay `DATABASE_URL`, el sitio sigue usando los stores anteriores de Blobs para artículos y clientas, de modo que un deploy previo a la configuración no se rompe. Reseñas, invitaciones y rate limits siempre permanecen en Blobs.
 
 **Seguridad**: si alguna connection string se compartió o comprometió, rota la contraseña en Netlify DB antes de guardarla como variable de entorno. No la escribas en `.env.local`, `.env.netlify` ni en el repositorio.
@@ -72,6 +80,7 @@ npm run lint         # ESLint
 npm run lint:fix     # ESLint con corrección automática
 npm run format       # Prettier
 npm run test         # Pruebas unitarias (Vitest)
+npm run db:setup     # Crea/verifica el esquema en Netlify DB usando DATABASE_URL
 npm run test:watch   # Vitest en modo watch
 npm run dev:netlify  # Netlify Dev (incluye Functions y Blobs locales)
 npm run deploy       # Build + deploy a producción con Netlify CLI

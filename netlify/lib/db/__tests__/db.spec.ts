@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { BlogPostRecord } from '../../../../src/types/blog'
 import type { ReviewClient } from '../../../../src/types/review-invitations'
@@ -39,12 +40,14 @@ function fakeSql(
   respond: (call: SqlCall, index: number) => DbRow[] = () => []
 ): { sql: Sql; calls: SqlCall[] } {
   const calls: SqlCall[] = []
-  const sql = ((strings: TemplateStringsArray | string, ...values: unknown[]) => {
-    const query = typeof strings === 'string' ? strings : strings.join('?')
+  const run = (query: string, values: unknown[]) => {
     const call = { query, values }
     calls.push(call)
     return Promise.resolve(respond(call, calls.length - 1))
-  }) as Sql
+  }
+  const sql = ((strings: TemplateStringsArray | string, ...values: unknown[]) =>
+    run(typeof strings === 'string' ? strings : strings.join('?'), values)) as Sql
+  sql.query = ((query: string, params: unknown[] = []) => run(query, params)) as Sql['query']
   return { sql, calls }
 }
 
@@ -57,6 +60,20 @@ describe('esquema y configuración', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS schedule_slots')
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS appointments')
     expect(schema).toContain("WHERE status = 'reserved'")
+  })
+
+  it('mantiene schema.sql sincronizado con las sentencias de la app', () => {
+    const normalize = (value: string) =>
+      value
+        .replace(/--[^\n]*/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+    const fromSql = readFileSync('netlify/lib/db/schema.sql', 'utf8')
+      .split(';')
+      .map(normalize)
+      .filter(Boolean)
+
+    expect(fromSql).toEqual(SCHEMA_STATEMENTS.map(normalize))
   })
 
   it('lee la connection string de DATABASE_URL o NETLIFY_DATABASE_URL', () => {
