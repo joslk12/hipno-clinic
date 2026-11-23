@@ -5,6 +5,7 @@ import {
   formatAppointmentDate,
   formatAppointmentShortDate,
   formatAppointmentTime,
+  formatMonthLabel,
   getBookingWindow,
   getLocalDateKey,
   getWeekdayFromDateKey,
@@ -49,6 +50,12 @@ describe('content/appointments', () => {
     expect(formatAppointmentTime('2026-06-15T10:00')).toBe('10:00')
     expect(formatAppointmentTime('2026-06-15T16:00:00.000Z')).toBe('10:00')
     expect(formatAppointmentDate('no-valida')).toBe('')
+  })
+
+  it('rotula el mes con el número de mes correcto (1..12)', () => {
+    expect(formatMonthLabel(2026, 11)).toBe('noviembre de 2026')
+    expect(formatMonthLabel(2026, 12)).toBe('diciembre de 2026')
+    expect(formatMonthLabel(2027, 1)).toBe('enero de 2027')
   })
 
   it('agrupa y ordena los horarios por día local', () => {

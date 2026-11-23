@@ -56,10 +56,14 @@ const actionError = ref('')
 const fieldErrors = ref<Record<string, string>>({})
 const saving = ref(false)
 const editingRuleId = ref<string | null>(null)
+/** Reglas con la misma hora/duración/servicio/vigencia se editan como un grupo. */
+const editingGroupIds = ref<string[]>([])
+const selectedDay = ref<string | null>(null)
+const blockUntil = ref('20:00')
 
 function emptyRuleForm() {
   return {
-    weekday: '1',
+    weekdays: ['1'] as string[],
     startTime: '10:00',
     durationMinutes: 60,
     serviceId: '',
@@ -71,6 +75,7 @@ function emptyRuleForm() {
 
 const ruleForm = reactive(emptyRuleForm())
 const slotForm = reactive({ date: todayKey, time: '10:00', durationMinutes: 60, serviceId: '' })
+const extraSlotForm = reactive({ time: '11:00', durationMinutes: 60 })
 
 const monthLabel = computed(() => {
   const [visibleYear, visibleMonthNumber] = visibleMonth.value.split('-').map(Number)
@@ -103,7 +108,21 @@ function errorFor(field: string): string {
 function resetRuleForm() {
   Object.assign(ruleForm, emptyRuleForm())
   editingRuleId.value = null
+  editingGroupIds.value = []
   fieldErrors.value = {}
+}
+
+function ruleGroupOf(rule: AvailabilityRule): AvailabilityRule[] {
+  return rules.value.filter(
+    (item) =>
+      item.id === rule.id ||
+      (item.startTime === rule.startTime &&
+        item.durationMinutes === rule.durationMinutes &&
+        item.serviceId === rule.serviceId &&
+        item.validFrom === rule.validFrom &&
+        item.validUntil === rule.validUntil &&
+        item.active === rule.active)
+  )
 }
 
 function handleError(caught: unknown, fallback: string) {
@@ -151,9 +170,11 @@ async function load() {
 function editRule(rule: AvailabilityRule) {
   actionError.value = ''
   fieldErrors.value = {}
+  const group = ruleGroupOf(rule)
   editingRuleId.value = rule.id
+  editingGroupIds.value = group.map((item) => item.id)
   Object.assign(ruleForm, {
-    weekday: String(rule.weekday),
+    weekdays: [...new Set(group.map((item) => String(item.weekday)))],
     startTime: rule.startTime,
     durationMinutes: rule.durationMinutes,
     serviceId: rule.serviceId ?? '',
@@ -166,10 +187,16 @@ function editRule(rule: AvailabilityRule) {
 async function submitRule() {
   actionError.value = ''
   fieldErrors.value = {}
-  saving.value = true
 
-  const input: AvailabilityRuleInput = {
-    weekday: Number(ruleForm.weekday) as Weekday,
+  const weekdays = [...new Set(ruleForm.weekdays.map(Number))].filter(
+    (value): value is Weekday => value >= 0 && value <= 6
+  )
+  if (!weekdays.length) {
+    fieldErrors.value = { weekday: 'Selecciona al menos un día.' }
+    return
+  }
+
+  const baseInput: Omit<AvailabilityRuleInput, 'weekday'> = {
     startTime: ruleForm.startTime,
     durationMinutes: Number(ruleForm.durationMinutes),
     serviceId: ruleForm.serviceId || null,
@@ -178,13 +205,37 @@ async function submitRule() {
     active: ruleForm.active
   }
 
+  saving.value = true
   try {
-    const editingId = editingRuleId.value
-    if (editingId) await updateRule(editingId, input)
-    else await createRule(input)
+    const wasEditing = Boolean(editingRuleId.value)
+    if (wasEditing) {
+      const group = rules.value.filter((item) => editingGroupIds.value.includes(item.id))
+      for (const rule of group) {
+        if (weekdays.includes(rule.weekday)) {
+          await updateRule(rule.id, { ...baseInput, weekday: rule.weekday })
+        } else {
+          await deleteRule(rule.id)
+        }
+      }
+      for (const weekday of weekdays) {
+        if (!group.some((item) => item.weekday === weekday)) {
+          await createRule({ ...baseInput, weekday })
+        }
+      }
+    } else {
+      for (const weekday of weekdays) {
+        await createRule({ ...baseInput, weekday })
+      }
+    }
 
+    const daysLabel = weekdays.map((weekday) => WEEKDAY_LABELS[weekday]).join(', ')
     resetRuleForm()
-    emit('notice', editingId ? 'Regla actualizada.' : 'Regla creada.')
+    emit(
+      'notice',
+      wasEditing
+        ? `Regla${weekdays.length > 1 ? 's' : ''} actualizada${weekdays.length > 1 ? 's' : ''} (${daysLabel}).`
+        : `Regla${weekdays.length > 1 ? 's' : ''} creada${weekdays.length > 1 ? 's' : ''} (${daysLabel}).`
+    )
     await load()
   } catch (caught) {
     handleError(caught, 'No pudimos guardar la regla.')
@@ -232,16 +283,11 @@ async function submitSlot() {
 }
 
 async function toggleBlock(slot: ManualSlotRecord) {
-  actionError.value = ''
-  fieldErrors.value = {}
-
-  try {
-    await setSlotBlocked(slot.slotKey, !slot.blocked)
-    emit('notice', slot.blocked ? 'Horario desbloqueado.' : 'Horario bloqueado.')
-    await load()
-  } catch (caught) {
-    handleError(caught, 'No pudimos actualizar el horario.')
-  }
+  await changeBlock(
+    slot.slotKey,
+    !slot.blocked,
+    slot.blocked ? 'Horario desbloqueado.' : 'Horario bloqueado.'
+  )
 }
 
 async function removeSlot(slot: ManualSlotRecord) {
@@ -293,6 +339,166 @@ function dayLabel(dateKey: string): string {
   return `${formatAppointmentDate(dateKey)}: ${labels[status]}`
 }
 
+interface DayHour {
+  slotKey: string
+  time: string
+  status: 'available' | 'reserved' | 'blocked'
+  durationMinutes: number
+  serviceId: string | null
+  blocked: boolean
+}
+
+/** Todas las horas del día: reglas vigentes, horarios sueltos y citas reservadas. */
+function hoursForDay(dateKey: string): DayHour[] {
+  const byKey = new Map<string, DayHour>()
+
+  for (const rule of rules.value) {
+    if (!ruleCoversDay(rule, dateKey)) continue
+    const slotKey = `${dateKey}T${rule.startTime}`
+    byKey.set(slotKey, {
+      slotKey,
+      time: rule.startTime,
+      status: 'available',
+      durationMinutes: rule.durationMinutes,
+      serviceId: rule.serviceId,
+      blocked: false
+    })
+  }
+
+  for (const slot of manualSlots.value.filter((item) => item.slotKey.startsWith(`${dateKey}T`))) {
+    const previous = byKey.get(slot.slotKey)
+    byKey.set(slot.slotKey, {
+      slotKey: slot.slotKey,
+      time: slot.slotKey.slice(11),
+      status: slot.blocked ? 'blocked' : (previous?.status ?? 'available'),
+      durationMinutes: slot.durationMinutes,
+      serviceId: slot.serviceId,
+      blocked: slot.blocked
+    })
+  }
+
+  for (const booking of bookings.value) {
+    if (booking.status !== 'reserved' || !booking.slotKey.startsWith(`${dateKey}T`)) continue
+    const previous = byKey.get(booking.slotKey)
+    byKey.set(booking.slotKey, {
+      slotKey: booking.slotKey,
+      time: booking.slotKey.slice(11),
+      status: previous?.blocked ? 'blocked' : 'reserved',
+      durationMinutes: booking.durationMinutes,
+      serviceId: booking.serviceId,
+      blocked: previous?.blocked ?? false
+    })
+  }
+
+  return [...byKey.values()].sort((left, right) => left.time.localeCompare(right.time))
+}
+
+const selectedDayHours = computed(() =>
+  selectedDay.value ? hoursForDay(selectedDay.value) : []
+)
+
+function selectDay(dateKey: string) {
+  selectedDay.value = dateKey
+  slotForm.date = dateKey
+}
+
+async function changeBlock(slotKey: string, blocked: boolean, notice: string) {
+  actionError.value = ''
+  fieldErrors.value = {}
+  saving.value = true
+
+  try {
+    await setSlotBlocked(slotKey, blocked)
+    emit('notice', notice)
+    await load()
+  } catch (caught) {
+    handleError(caught, 'No pudimos actualizar el horario.')
+  } finally {
+    saving.value = false
+  }
+}
+
+function timeToMinutes(value: string): number {
+  const [hours, minutes] = value.split(':').map(Number)
+  return (hours ?? 0) * 60 + (minutes ?? 0)
+}
+
+function minutesToTime(value: number): string {
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`
+}
+
+async function blockFrom(hour: DayHour) {
+  const dateKey = selectedDay.value
+  if (!dateKey) return
+
+  const fromMinutes = timeToMinutes(hour.time)
+  const untilMinutes = timeToMinutes(blockUntil.value)
+  const step = hour.durationMinutes >= 15 ? hour.durationMinutes : 60
+
+  if (untilMinutes <= fromMinutes) {
+    actionError.value = 'La hora final debe ser posterior a la hora de inicio.'
+    return
+  }
+
+  actionError.value = ''
+  fieldErrors.value = {}
+  saving.value = true
+
+  try {
+    const existing = new Map(selectedDayHours.value.map((item) => [item.time, item]))
+    for (let minutes = fromMinutes; minutes <= untilMinutes; minutes += step) {
+      const time = minutesToTime(minutes)
+      const found = existing.get(time)
+      if (found?.blocked) continue
+
+      if (found) {
+        await setSlotBlocked(found.slotKey, true)
+      } else {
+        await createManualSlot({
+          date: dateKey,
+          time,
+          durationMinutes: step,
+          serviceId: null
+        })
+        await setSlotBlocked(`${dateKey}T${time}`, true)
+      }
+    }
+
+    emit('notice', `Horarios bloqueados de ${hour.time} a ${blockUntil.value}.`)
+    await load()
+  } catch (caught) {
+    handleError(caught, 'No pudimos bloquear los horarios.')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function blockExtraHour() {
+  const dateKey = selectedDay.value
+  const time = extraSlotForm.time
+  if (!dateKey || !time) return
+
+  actionError.value = ''
+  fieldErrors.value = {}
+  saving.value = true
+
+  try {
+    await createManualSlot({
+      date: dateKey,
+      time,
+      durationMinutes: Number(extraSlotForm.durationMinutes),
+      serviceId: null
+    })
+    await setSlotBlocked(`${dateKey}T${time}`, true)
+    emit('notice', `Hora ${time} bloqueada.`)
+    await load()
+  } catch (caught) {
+    handleError(caught, 'No pudimos bloquear la hora.')
+  } finally {
+    saving.value = false
+  }
+}
+
 function goToMonth(offset: number) {
   const next = shiftMonthKey(visibleMonth.value, offset)
   if (next < firstMonth || next > lastMonth) return
@@ -333,23 +539,28 @@ defineExpose({ load })
             {{ editingRuleId ? 'Editar regla' : 'Nueva regla semanal' }}
           </h3>
 
-          <div class="space-y-2">
-            <label for="rule-weekday" class="block font-body text-sm font-medium text-text">
-              Día de la semana
-            </label>
-            <select
-              id="rule-weekday"
-              v-model="ruleForm.weekday"
-              class="w-full rounded-md border border-border bg-surface px-3 py-2 font-body text-sm text-text focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
-            >
-              <option v-for="(label, value) in WEEKDAY_LABELS" :key="label" :value="String(value)">
+          <fieldset class="space-y-2">
+            <legend class="block font-body text-sm font-medium text-text">Días de la semana</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">
+              <label
+                v-for="(label, value) in WEEKDAY_LABELS"
+                :key="label"
+                class="flex items-center gap-1.5 font-body text-sm capitalize text-text"
+              >
+                <input
+                  v-model="ruleForm.weekdays"
+                  type="checkbox"
+                  :value="String(value)"
+                  class="h-4 w-4 accent-accent"
+                />
                 {{ label }}
-              </option>
-            </select>
+              </label>
+            </div>
+            <p class="font-body text-xs text-text-muted">Puedes elegir varios días para la misma regla.</p>
             <p v-if="errorFor('weekday')" class="font-body text-sm text-red-500" role="alert">
               {{ errorFor('weekday') }}
             </p>
-          </div>
+          </fieldset>
 
           <div class="grid gap-4 sm:grid-cols-2">
             <BaseInput
@@ -581,6 +792,10 @@ defineExpose({ load })
           </div>
         </div>
 
+        <p class="mt-3 font-body text-xs text-text-muted">
+          Selecciona un día para revisar y bloquear sus horas.
+        </p>
+
         <table class="mt-4 w-full table-fixed border-collapse text-center">
           <caption class="sr-only">Estado de la disponibilidad en {{ monthLabel }}</caption>
           <thead>
@@ -600,16 +815,28 @@ defineExpose({ load })
               <td
                 v-for="(dateKey, dayIndex) in calendarDays.slice(weekIndex * 7, weekIndex * 7 + 7)"
                 :key="dateKey ?? `empty-${weekIndex}-${dayIndex}`"
-                :aria-label="dateKey ? dayLabel(dateKey) : undefined"
-                :class="[
-                  'h-10 rounded-md border border-border/60 p-1 font-body text-xs',
-                  !dateKey ? 'bg-transparent' : 'text-text',
-                  dateKey && dayStatus(dateKey) === 'available' ? 'bg-accent-satin/15' : '',
-                  dateKey && dayStatus(dateKey) === 'reserved' ? 'bg-blue-500/20' : '',
-                  dateKey && dayStatus(dateKey) === 'blocked' ? 'bg-red-500/15' : ''
-                ]"
+                class="p-1"
               >
-                {{ dateKey ? Number(dateKey.slice(-2)) : '' }}
+                <button
+                  v-if="dateKey"
+                  type="button"
+                  :disabled="dateKey < todayKey || dateKey > horizonKey"
+                  :aria-label="dayLabel(dateKey)"
+                  :aria-pressed="selectedDay === dateKey ? 'true' : undefined"
+                  :class="[
+                    'flex h-10 w-full items-center justify-center rounded-md border font-body text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    dateKey < todayKey || dateKey > horizonKey
+                      ? 'cursor-not-allowed border-transparent text-text-muted/40'
+                      : 'text-text hover:border-accent',
+                    dayStatus(dateKey) === 'available' ? 'bg-accent-satin/15' : '',
+                    dayStatus(dateKey) === 'reserved' ? 'bg-blue-500/20' : '',
+                    dayStatus(dateKey) === 'blocked' ? 'bg-red-500/15' : '',
+                    selectedDay === dateKey ? 'border-accent ring-1 ring-accent' : 'border-border/60'
+                  ]"
+                  @click="selectDay(dateKey)"
+                >
+                  {{ Number(dateKey.slice(-2)) }}
+                </button>
               </td>
             </tr>
           </tbody>
@@ -620,6 +847,112 @@ defineExpose({ load })
           <li class="flex items-center gap-2"><span class="h-3 w-3 rounded bg-blue-500/40" /> Reservados</li>
           <li class="flex items-center gap-2"><span class="h-3 w-3 rounded bg-red-500/40" /> Bloqueados</li>
         </ul>
+
+        <div v-if="selectedDay" class="mt-5 rounded-xl border border-border bg-surface-alt p-4">
+          <h4 class="font-display text-base font-semibold text-accent">
+            Horarios del {{ formatAppointmentDate(selectedDay) }}
+          </h4>
+          <div class="mt-3 flex flex-wrap items-end gap-3">
+            <BaseInput
+              id="block-until"
+              v-model="blockUntil"
+              label="Bloquear hasta"
+              type="time"
+              required
+            />
+            <p class="pb-2 font-body text-xs text-text-muted">
+              Límite usado por «BLOQUEAR DESDE AQUÍ».
+            </p>
+          </div>
+
+          <ul v-if="selectedDayHours.length" class="mt-3 space-y-2">
+            <li
+              v-for="hour in selectedDayHours"
+              :key="hour.slotKey"
+              class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+            >
+              <div>
+                <p class="font-body text-sm font-semibold text-text">
+                  {{ hour.time }}
+                  <span class="font-normal text-text-muted">· {{ serviceName(hour.serviceId) }}</span>
+                </p>
+                <p
+                  class="font-body text-xs"
+                  :class="
+                    hour.status === 'blocked'
+                      ? 'text-red-500'
+                      : hour.status === 'reserved'
+                        ? 'text-blue-500'
+                        : 'text-text-muted'
+                  "
+                >
+                  {{ hour.status === 'blocked' ? 'Bloqueado' : hour.status === 'reserved' ? 'Reservado' : 'Disponible' }}
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <BaseButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  :aria-label="`${hour.blocked ? 'Desbloquear' : 'Bloquear'} hora ${hour.time}`"
+                  @click="
+                    changeBlock(
+                      hour.slotKey,
+                      !hour.blocked,
+                      hour.blocked ? 'Horario desbloqueado.' : 'Horario bloqueado.'
+                    )
+                  "
+                >
+                  {{ hour.blocked ? 'DESBLOQUEAR' : 'BLOQUEAR' }}
+                </BaseButton>
+                <BaseButton
+                  v-if="
+                    !hour.blocked &&
+                    selectedDayHours.some((item) => item.time > hour.time && !item.blocked)
+                  "
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  :aria-label="`Bloquear desde aquí: ${hour.time} hasta ${blockUntil}`"
+                  @click="blockFrom(hour)"
+                >
+                  BLOQUEAR DESDE AQUÍ
+                </BaseButton>
+              </div>
+            </li>
+          </ul>
+          <p v-else class="mt-3 font-body text-sm text-text-muted">
+            Este día no tiene horas publicadas.
+          </p>
+
+          <form
+            class="mt-4 flex flex-wrap items-end gap-3 border-t border-border pt-4"
+            @submit.prevent="blockExtraHour"
+          >
+            <BaseInput
+              id="extra-hour-time"
+              v-model="extraSlotForm.time"
+              label="Bloquear hora adicional"
+              type="time"
+              required
+            />
+            <BaseInput
+              id="extra-hour-duration"
+              :model-value="String(extraSlotForm.durationMinutes)"
+              label="Duración (min)"
+              type="number"
+              min="15"
+              max="480"
+              step="15"
+              required
+              @update:model-value="extraSlotForm.durationMinutes = Number($event)"
+            />
+            <BaseButton type="submit" size="sm">BLOQUEAR HORA</BaseButton>
+          </form>
+        </div>
+        <p v-else class="mt-5 font-body text-sm text-text-muted">
+          Selecciona un día del calendario para editar sus horarios.
+        </p>
       </div>
     </template>
   </section>

@@ -5,6 +5,7 @@ import AppointmentScheduler from '../AppointmentScheduler.vue'
 import {
   addDaysToDateKey,
   formatAppointmentDate,
+  formatMonthLabel,
   getLocalDateKey,
   monthKeyFromDateKey,
   shiftMonthKey
@@ -65,6 +66,16 @@ describe('AppointmentScheduler', () => {
       'date'
     )
     expect(screen.getAllByText(new RegExp(formatAppointmentDate(today))).length).toBeGreaterThan(0)
+  })
+
+  it('muestra el mes actual en el encabezado, sin adelantarlo', () => {
+    const [year, month] = monthKeyFromDateKey(today).split('-').map(Number)
+    render(AppointmentScheduler, { props: { slots: [makeSlot(`${firstDay}T10:00`)] } })
+
+    expect(screen.getByText(formatMonthLabel(year!, month!))).toBeInTheDocument()
+    expect(document.querySelector('caption')).toHaveTextContent(
+      `Horarios disponibles para ${formatMonthLabel(year!, month!)}`
+    )
   })
 
   it('navega entre meses con botones accesibles', async () => {

@@ -13,7 +13,7 @@ import {
   setSlotBlocked,
   updateRule
 } from '../../../services/adminAppointments'
-import { addDaysToDateKey, getLocalDateKey } from '../../../content/appointments'
+import { addDaysToDateKey, formatAppointmentDate, getLocalDateKey } from '../../../content/appointments'
 import type { Appointment, AvailabilityRule, ManualSlotRecord } from '../../../types/appointments'
 
 vi.mock('../../../services/adminAppointments', () => {
@@ -129,13 +129,14 @@ describe('AdminAvailabilityEditor', () => {
     const { emitted } = render(AdminAvailabilityEditor)
     await waitFor(() => expect(screen.getByRole('button', { name: 'CREAR REGLA' })).toBeInTheDocument())
 
-    await fireEvent.update(screen.getByLabelText('Día de la semana'), '3')
+    await userEvent.click(screen.getByLabelText('lunes'))
+    await userEvent.click(screen.getByLabelText('miércoles'))
     await fireEvent.update(screen.getByLabelText('Hora de inicio'), '11:30')
     await fireEvent.update(screen.getAllByLabelText('Duración (minutos)')[0], '90')
     await fireEvent.update(screen.getAllByLabelText('Servicio')[0], 'hipnosis-regresiva')
     await userEvent.click(screen.getByRole('button', { name: 'CREAR REGLA' }))
 
-    await waitFor(() => expect(createRule).toHaveBeenCalled())
+    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(1))
     expect(createRule).toHaveBeenCalledWith(
       expect.objectContaining({
         weekday: 3,
@@ -145,7 +146,20 @@ describe('AdminAvailabilityEditor', () => {
         active: true
       })
     )
-    expect(emitted().notice).toEqual([['Regla creada.']])
+    expect(emitted().notice).toEqual([['Regla creada (miércoles).']])
+  })
+
+  it('crea una regla para varios días a la vez', async () => {
+    const { emitted } = render(AdminAvailabilityEditor)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'CREAR REGLA' })).toBeInTheDocument())
+
+    await userEvent.click(screen.getByLabelText('martes'))
+    await userEvent.click(screen.getByLabelText('viernes'))
+    await userEvent.click(screen.getByRole('button', { name: 'CREAR REGLA' }))
+
+    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(createRule).mock.calls.map(([input]) => input.weekday)).toEqual([1, 2, 5])
+    expect(emitted().notice).toEqual([['Reglas creadas (lunes, martes, viernes).']])
   })
 
   it('edita y elimina una regla', async () => {
@@ -193,6 +207,103 @@ describe('AdminAvailabilityEditor', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'BLOQUEAR' }))
     await waitFor(() => expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T10:00`, true))
+  })
+
+  it('permite bloquear horas desde el calendario', async () => {
+    render(AdminAvailabilityEditor)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+      ).toBeInTheDocument()
+    )
+
+    await userEvent.click(
+      screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+    )
+
+    expect(screen.getByRole('heading', { name: new RegExp('Horarios del') })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Bloquear hora 10:00' }))
+
+    await waitFor(() => expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T10:00`, true))
+  })
+
+  it('bloquea todas las horas posteriores a la elegida', async () => {
+    const hours = ['10:00', '11:00', '12:00'].map((time, index) => ({
+      ...manualSlot,
+      id: `slot-hour-${index}`,
+      slotKey: `${day}T${time}`,
+      blocked: false
+    }))
+    vi.mocked(listManualSlots).mockResolvedValue(hours)
+    vi.mocked(listBookings).mockResolvedValue([booking])
+
+    render(AdminAvailabilityEditor)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+    )
+    await fireEvent.update(screen.getByLabelText('Bloquear hasta'), '12:00')
+    await userEvent.click(
+      screen.getByRole('button', { name: /Bloquear desde aquí: 11:00 hasta 12:00/ })
+    )
+
+    await waitFor(() => expect(setSlotBlocked).toHaveBeenCalledTimes(2))
+    expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T11:00`, true)
+    expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T12:00`, true)
+    expect(setSlotBlocked).not.toHaveBeenCalledWith(`${day}T10:00`, true)
+  })
+
+  it('crea y bloquea horas posteriores aunque no tengan regla publicada', async () => {
+    const nextHour = { ...manualSlot, id: 'slot-11', slotKey: `${day}T11:00` }
+    vi.mocked(listManualSlots).mockResolvedValue([manualSlot, nextHour])
+    vi.mocked(listBookings).mockResolvedValue([])
+
+    render(AdminAvailabilityEditor)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+    )
+    await fireEvent.update(screen.getByLabelText('Bloquear hasta'), '12:00')
+    await userEvent.click(
+      screen.getByRole('button', { name: /Bloquear desde aquí: 10:00 hasta 12:00/ })
+    )
+
+    await waitFor(() => expect(createManualSlot).toHaveBeenCalledTimes(1))
+    expect(createManualSlot).toHaveBeenCalledWith(
+      expect.objectContaining({ date: day, time: '12:00' })
+    )
+    expect(setSlotBlocked).toHaveBeenCalledTimes(3)
+    expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T11:00`, true)
+    expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T12:00`, true)
+  })
+
+  it('bloquea una hora adicional aunque no tenga regla publicada', async () => {
+    render(AdminAvailabilityEditor)
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+      ).toBeInTheDocument()
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: new RegExp(formatAppointmentDate(day)) })
+    )
+
+    await fireEvent.update(screen.getByLabelText('Bloquear hora adicional'), '13:00')
+    await userEvent.click(screen.getByRole('button', { name: 'BLOQUEAR HORA' }))
+
+    await waitFor(() => expect(createManualSlot).toHaveBeenCalled())
+    expect(createManualSlot).toHaveBeenCalledWith(
+      expect.objectContaining({ date: day, time: '13:00' })
+    )
+    expect(setSlotBlocked).toHaveBeenCalledWith(`${day}T13:00`, true)
   })
 
   it('avisa de sesión expirada al recibir un 401', async () => {

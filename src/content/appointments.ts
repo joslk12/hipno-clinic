@@ -186,8 +186,9 @@ export function formatAppointmentTime(value: string | Date): string {
   return timeFormatter.format(date)
 }
 
+/** El mes llega en 1..12; Date.UTC lo interpreta en 0..11. */
 export function formatMonthLabel(year: number, month: number): string {
-  return monthFormatter.format(new Date(Date.UTC(year, month, 1)))
+  return monthFormatter.format(new Date(Date.UTC(year, month - 1, 1)))
 }
 
 export function monthKeyFromDateKey(dateKey: string): string {

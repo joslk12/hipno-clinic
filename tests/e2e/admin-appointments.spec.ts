@@ -157,7 +157,7 @@ test('gestiona reglas, bloqueos y citas desde /admin/citas', async ({ page }) =>
   await page.locator('#rule-duration').fill('90')
   await page.getByRole('button', { name: 'CREAR REGLA' }).click()
 
-  await expect(page.getByText('Regla creada.')).toBeVisible()
+  await expect(page.getByText('Regla creada (lunes).')).toBeVisible()
   await expect(page.getByRole('cell', { name: '11:00' })).toBeVisible()
   expect(mutations[0]).toMatchObject({
     path: '/api/admin/appointments/rules',
