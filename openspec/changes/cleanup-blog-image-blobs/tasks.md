@@ -22,4 +22,4 @@
 - [x] 4.1 `npm run typecheck`, `npm run lint` (0 errores, 2 warnings `v-html` previos), `npm test` (327 pruebas) y `npm run build`.
 - [x] 4.2 `CI=1 npx playwright test` (95 pruebas E2E).
 - [x] 4.3 `npx openspec validate cleanup-blog-image-blobs --strict` (válido).
-- [ ] 4.4 Commitear, pushear, redesplegar y validar en producción; restaurar `public/sitemap.xml` si el build lo modifica.
+- [x] 4.4 Commiteado (`90935dd`), pusheado y redesplegado: deploy `ready`, `/api/admin/blog/posts` responde 401 sin sesión, `/api/blog/posts` responde 200 y el bundle del panel contiene el aviso de limpieza. `public/sitemap.xml` restaurado antes del commit.
