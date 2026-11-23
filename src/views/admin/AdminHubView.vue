@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import AdminLogin from '@/components/admin/AdminLogin.vue';
 import AdminNav from '@/components/admin/AdminNav.vue';
 import { usePageMeta } from '@/composables/usePageMeta';
-import { routes } from '@/router';
 import { AdminBlogApiError, getSession, logout } from '@/services/adminBlog';
 
 usePageMeta({
@@ -17,10 +16,6 @@ usePageMeta({
 const checking = ref(true);
 const authenticated = ref(false);
 const error = ref('');
-
-const appointmentsAvailable = computed(() => 
-    routes.some((route) => route.path === '/admin/citas')
-);
 
 async function checkSession() {
     checking.value = true;
@@ -67,7 +62,8 @@ onMounted(checkSession);
             </div>
         </div>
 
-        <div v-if="checking"
+        <div
+            v-if="checking"
             class="mx-auto flex min-h-[50vh] max-w-3xl items-center justify-center px-4 font-body text-sm text-text-muted"
             role="status"
             aria-live="polite"
@@ -112,7 +108,6 @@ onMounted(checkSession);
                     </li>
                     <li>
                         <RouterLink
-                            v-if="appointmentsAvailable"
                             to="/admin/citas"
                             class="block h-full rounded-xl border border-border bg-surface p-6 transition-colors hover:border-accent"
                         >
@@ -121,14 +116,6 @@ onMounted(checkSession);
                                 Administra disponibilidad y reservas.
                             </p>
                         </RouterLink>
-                        <div
-                            v-else
-                            aria-disabled="true"
-                            class="block h-full rounded-xl border border-border bg-surface-alt p-6 opacity-70"
-                        >
-                            <h2 class="font-display text-xl font-semibold text-accent">Citas</h2>
-                            <p class="mt-2 font-body text-sm text-text-muted">Próximamente.</p>
-                        </div>
                     </li>
                 </ul>
             </div>

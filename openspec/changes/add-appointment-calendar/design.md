@@ -7,7 +7,7 @@ Ver `proposal.md` para la motivación.Estado actual relevante:
 - `/contacto` usa `ContactForm.vue` con `sendContact()` a Netlify Forms; `index.html` contiene el formulario oculto que Netlify necesita. No hay base de datos de citas.
 - `src/stores/booking.ts` guarda en memoria el servicio seleccionado y los campos del formulario; `src/content/services.ts` define duraciones de 60, 90 y 120 minutos.
 - El panel `/admin/blog` ya resuelve login, logout, sesión HMAC de 8 horas y verificación de origen (`netlify/lib/blog/auth.ts`).
-- Las Functions siguen el patrón `config.path` propio y la lógica reutilizable vive en `netlify/lib/<dominio>/`, con stores de Netlify Blobs y stores en memoria para tests.
+- Las Functions siguen el patrón `config.path` propio y la lógica reutilizable vive en `netlify/lib/<dominio>/`, con repositorios de Netlify DB (Postgres/Neon) y stores en memoria para tests. Netlify Blobs queda reservado a imágenes y a datos operativos que no se migran (reseñas, invitaciones y rate limits).
 - El change `add-review-invitations` define proveedores de Resend y WhatsApp Cloud API y reutiliza la misma sesión; sus adaptadores deben estar desplegados antes de este cambio.
 - La CSP actual solo permite `connect-src 'self'`; todas las APIs nuevas son same-origin, por lo que no hace falta ampliarla.
 - El spec base de contacto vive en `openspec/changes/origen-consciente-website/specs/contact-booking/spec.md` y aún no está sincronizado a `openspec/specs/`.
@@ -34,14 +34,14 @@ Ver `proposal.md` para la motivación.Estado actual relevante:
 
 ### 1. Disponibilidad híbrida con una sola clave de horario
 
-Se combinan reglas recurrentes y excepciones individuales bajo una clave de horario determinista `slotKey = YYYY-MM-DDTHH:mm` en `America/Mexico_City`.
+Se combinan reglas recurrentes y excepciones individuales bajo una clave de horario determinista `slotKey = YYYY-MM-DDTHH:mm` en `America/Mexico_City`, almacenada en Postgres.
 
-- Reglas: `rule:<uuid>` con `{ weekday, startTime, durationMinutes, serviceId?, validFrom?, validUntil?, active }`.
-- Horarios sueltos o bloqueos: `slot:<uuid>` con `{ startsAt (UTC), durationMinutes, serviceId?, blocked }`.
-- Un horario individual en el mismo `slotKey` que una regla la sobrescribe; si está marcado como `blocked`, oculta ese horario generado.
+- `availability_rules`: `{ id, weekday, startTime, durationMinutes, serviceId?, validFrom?, validUntil?, active, createdAt, updatedAt }`.
+- `schedule_slots`: `{ slot_key (PK), starts_at, duration_minutes, service_id, blocked, source, rule_id, created_at, updated_at }`. Guarda horarios individuales y bloqueos; los horarios generados por reglas se materializan solo cuando se reservan.
+- Un `schedule_slots` en el mismo `slotKey` que una regla la sobrescribe; si `blocked = true`, oculta ese horario generado.
 - La generación ocurre en lectura, con un horizonte de **60 días**, y excluye pasados, bloqueados y reservados.
 
-**Alternativa descartada**: materializar todos los horarios generados en Blobs. Genera muchas escrituras y obliga a reprocesar al editar reglas.
+**Alternativa descartada**: materializar todos los horarios generados en una tabla. Genera muchas escrituras y obliga a reprocesar al editar reglas.
 
 ### 2. Zona horaria y conversiones
 
@@ -49,18 +49,25 @@ Toda fecha se guarda en UTC (`new Date().toISOString()`) y se interpreta en `Ame
 
 **Alternativa descartada**: guardar fechas locales sin zona. Produciría errores en cambios de horario y en despliegues con otra zona del servidor.
 
-### 3. Reserva atómica con escritura condicional
+### 3. Reserva atómica con índice único parcial
 
-Netlify Blobs soporta `onlyIfNew` en `set`. El flujo de reserva es:
+Postgres garantiza la exclusividad con un índice único parcial:
+
+```sql
+CREATE UNIQUE INDEX appointments_one_active_per_slot
+  ON appointments (slot_key) WHERE status = 'reserved';
+```
+
+El flujo de reserva es:
 
 1. Validar datos y que el `slotKey` esté en el futuro y disponible.
-2. Guardar la cita en `appointment:<uuid>`.
-3. Escribir el puntero `booking:<slotKey>` con `onlyIfNew: true`.
-4. Si el puntero ya existe (otra reserva ganó), eliminar la cita creada y responder `409`.
+2. Asegurar la fila en `schedule_slots` con `ON CONFLICT (slot_key) DO NOTHING`.
+3. Insertar en `appointments` con `ON CONFLICT (slot_key) WHERE status = 'reserved' DO NOTHING RETURNING *`.
+4. Si no hay filas devueltas, otra reserva ganó: responder `409` sin compensaciones.
 
-Cancelar una cita cambia su estado a `cancelada` y elimina el puntero `booking:<slotKey>`, liberando el horario salvo que exista un bloqueo explícito. Para actualizaciones de estado se usa `onlyIfMatch` con el ETag leído.
+Cancelar una cita cambia su estado a `cancelled`; el índice parcial libera el horario automáticamente salvo que exista un bloqueo explícito.
 
-**Alternativa descartada**: leer y escribir sin condición. Deja una ventana de carrera que puede generar dobles reservas.
+**Alternativa descartada**: leer y escribir sin condición. Deja una ventana de carrera que puede generar dobles reservas. También se descartó el puntero `booking:<slotKey>` de Blobs porque no podía compartir transición atómica con la fila de la cita.
 
 ### 4. APIs
 
@@ -112,7 +119,7 @@ Se reutiliza la capa de proveedores de `add-review-invitations` (`messaging.ts`)
 ## Risks / Trade-offs
 
 - [Riesgo] Confusión por zona horaria o cambio de horario de verano → Mitigación: conversión con `Intl` y almacenamiento en UTC; zona fija `America/Mexico_City`.
-- [Riesgo] Doble reserva por carrera → Mitigación: escritura condicional `onlyIfNew` en `booking:<slotKey>` y compensación si falla.
+- [Riesgo] Doble reserva por carrera → Mitigación: índice único parcial en `appointments` e `INSERT ... ON CONFLICT DO NOTHING RETURNING`.
 - [Riesgo] Horario mostrado que se ocupa justo antes de enviar → Mitigación: respuesta `409` con recarga de disponibilidad y conservación de datos.
 - [Riesgo] Reglas traslapadas que generan horarios inválidos → Mitigación: validación de solapamiento al guardar y deduplicación por `slotKey`.
 - [Riesgo] Proveedor de mensajería caído → Mitigación: la cita se guarda igual; el error se registra y se muestra en el panel.
@@ -122,13 +129,14 @@ Se reutiliza la capa de proveedores de `add-review-invitations` (`messaging.ts`)
 
 ## Migration Plan
 
-1. Sincronizar primero la spec `contact-booking` del change `origen-consciente-website` para que la base canónica exista antes de aplicar el delta MODIFIED.
-2. Aplicar y desplegar `add-review-invitations` para disponer de los proveedores de correo y WhatsApp.
-3. Desplegar las Functions y el store de citas sin crear reglas ni horarios: el sitio debe seguir mostrando el formulario actual.
-4. Verificar el fallback con la API de horarios caída y con respuesta vacía.
-5. Crear reglas de prueba en `/admin/citas` y validar el flujo servicio → contacto → reserva → cancelación.
-6. Rollback: eliminar las reglas y horarios publicados; el sitio vuelve automáticamente al formulario de Netlify Forms. Las citas existentes permanecen en Blobs y no afectan al sitio público.
+1. Rotar la credencial de Netlify DB que se compartió en la conversación y configurar `DATABASE_URL` como variable secreta en Netlify (o `NETLIFY_DATABASE_URL` si la provee la integración).
+2. Sincronizar primero la spec `contact-booking` del change `origen-consciente-website` para que la base canónica exista antes de aplicar el delta MODIFIED.
+3. Aplicar y desplegar `add-review-invitations` para disponer de los proveedores de correo y WhatsApp.
+4. Desplegar las Functions y el esquema de citas sin crear reglas ni horarios: el sitio debe seguir mostrando el formulario actual.
+5. Verificar el fallback con la API de horarios caída y con respuesta vacía.
+6. Crear reglas de prueba en `/admin/citas` y validar el flujo servicio → contacto → reserva → cancelación.
+7. Rollback: eliminar las reglas y horarios publicados; el sitio vuelve automáticamente al formulario de Netlify Forms. Las citas existentes permanecen en Postgres y no afectan al sitio público.
 
 ## Open Questions
 
-Ninguna. La disponibilidad combinada (reglas recurrentes e individuales), la reserva inmediata, el alcance del panel y el uso de los proveedores de correo/WhatsApp fueron definidos por el usuario. El horizonte de 60 días y la zona horaria `America/Mexico_City` se registran como decisiones de diseño.
+Ninguna. La disponibilidad combinada (reglas recurrentes e individuales), la reserva inmediata, el alcance del panel y el uso de los proveedores de correo/WhatsApp fueron definidos por el usuario. El horizonte de 60 días y la zona horaria `America/Mexico_City` se registran como decisiones de diseño. El destino es Netlify DB/Neon con `DATABASE_URL`; Blobs conserva únicamente imágenes, reseñas, invitaciones y rate limits.

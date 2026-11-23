@@ -1,3 +1,5 @@
+import { getSql, hasDatabase } from '../db/client'
+import { createPostgresClientStore } from './client-store'
 import { createInvitationSender, type InvitationSender } from './messaging'
 import {
   createBlobInvitationStore,
@@ -11,7 +13,11 @@ let invitationStore: InvitationStore | undefined
 let sender: InvitationSender | undefined
 
 export function getReviewClientStore(): ClientStore {
-  if (!clientStore) clientStore = createBlobReviewClientStore()
+  if (!clientStore) {
+    clientStore = hasDatabase()
+      ? createPostgresClientStore(getSql)
+      : createBlobReviewClientStore()
+  }
   return clientStore
 }
 

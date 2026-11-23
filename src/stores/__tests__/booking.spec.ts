@@ -1,6 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBookingStore } from '../booking'
+import type { ScheduleSlot } from '../../types/appointments'
+
+const slot: ScheduleSlot = {
+  slotKey: '2026-06-15T10:00',
+  startsAt: '2026-06-15T16:00:00.000Z',
+  durationMinutes: 60,
+  serviceId: null,
+  blocked: false,
+  source: 'rule',
+  ruleId: 'rule-1'
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -62,5 +73,35 @@ describe('useBookingStore', () => {
 
     expect(booking.selectedServiceId).toBe('hipnosis-regresiva')
     expect(booking.form.name).toBe('')
+  })
+
+  it('selecciona, limpia y reporta errores del horario', () => {
+    const booking = useBookingStore()
+
+    booking.setSlotError('Ese horario ya no está disponible.')
+    expect(booking.slotError).toBe('Ese horario ya no está disponible.')
+
+    booking.selectSlot(slot)
+    expect(booking.selectedSlot).toEqual(slot)
+    expect(booking.slotError).toBe('')
+
+    booking.setSlotError('Otro horario, por favor.')
+    expect(booking.slotError).toBe('Otro horario, por favor.')
+    expect(booking.selectedSlot).toBeNull()
+
+    booking.selectSlot(slot)
+    booking.clearSlot()
+    expect(booking.selectedSlot).toBeNull()
+  })
+
+  it('incluye el horario en el reinicio general', () => {
+    const booking = useBookingStore()
+
+    booking.selectSlot(slot)
+    booking.setSlotError('Conflicto.')
+    booking.reset()
+
+    expect(booking.selectedSlot).toBeNull()
+    expect(booking.slotError).toBe('')
   })
 })

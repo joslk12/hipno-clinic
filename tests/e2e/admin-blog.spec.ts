@@ -186,7 +186,7 @@ test('muestra el error cuando la contraseña es incorrecta', async ({ page }) =>
   await mockAdminApi(page, { loginStatus: 401 })
   await page.goto('/admin/blog')
 
-  await expect(page.getByRole('heading', { level: 1, name: 'Blog' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Panel de administrador' })).toBeVisible()
   await page.getByLabel('Contraseña').fill('incorrecta')
   await page.getByRole('button', { name: 'Entrar' }).click()
 
@@ -234,5 +234,5 @@ test('permite iniciar sesión, crear, previsualizar, publicar, reconstruir y sal
   expect(mutations[1]).toMatchObject({ method: 'PATCH', body: { status: 'published' } })
 
   await page.getByRole('button', { name: 'Cerrar sesión' }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Blog' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Panel de administrador' })).toBeVisible()
 })

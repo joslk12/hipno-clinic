@@ -133,7 +133,7 @@ test('pide login y gestiona clientes e invitaciones', async ({ page }) => {
   const api = await mockAdminApi(page)
 
   await page.goto('/admin/resenas')
-  await expect(page.getByRole('heading', { name: 'Blog' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Panel de administrador' })).toBeVisible()
   await page.getByLabel('Contraseña').fill('secreto')
   await page.getByRole('button', { name: 'Entrar' }).click()
 
@@ -142,7 +142,7 @@ test('pide login y gestiona clientes e invitaciones', async ({ page }) => {
   await page.getByRole('button', { name: 'Nuevo cliente' }).click()
   await page.locator('input[autocomplete="name"]').fill('Ana López')
   await page.locator('input[autocomplete="email"]').fill('ana@example.com')
-  await page.locator('input[autocomplete="tel"]').fill('525631270122')
+  await page.locator('input[autocomplete="tel-national"]').fill('5631270122')
   await page.getByRole('button', { name: 'Guardar cliente' }).click()
 
   await expect(page.getByRole('cell', { name: 'Ana López' })).toBeVisible()

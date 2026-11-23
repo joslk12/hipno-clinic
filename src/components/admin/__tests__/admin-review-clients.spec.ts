@@ -72,17 +72,49 @@ describe('AdminReviewClientList', () => {
 })
 
 describe('AdminReviewClientForm', () => {
-  it('emite los datos recortados al guardar', async () => {
+  it('emite los datos recortados al guardar con México por defecto', async () => {
     const { emitted } = render(AdminReviewClientForm, { props: { client: null } })
+
+    expect(screen.getByLabelText('País / código')).toHaveValue('MX')
 
     await fireEvent.update(screen.getByLabelText('Nombre'), '  Ana López  ')
     await fireEvent.update(screen.getByLabelText(/Correo electrónico/), ' ana@example.com ')
-    await fireEvent.update(screen.getByLabelText(/WhatsApp/), ' 525631270122 ')
+    await fireEvent.update(screen.getByLabelText(/Número de WhatsApp/), ' 56 3127 0122 ')
     await userEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
 
     expect(emitted().save).toEqual([
       [{ name: 'Ana López', email: 'ana@example.com', whatsapp: '525631270122' }]
     ])
+  })
+
+  it('usa el código del país seleccionado al guardar', async () => {
+    const { emitted } = render(AdminReviewClientForm, { props: { client: null } })
+
+    await fireEvent.update(screen.getByLabelText('Nombre'), 'Ana López')
+    await fireEvent.update(screen.getByLabelText('País / código'), 'ES')
+    await fireEvent.update(screen.getByLabelText(/Número de WhatsApp/), '612 345 678')
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
+
+    expect(emitted().save).toEqual([
+      [{ name: 'Ana López', email: '', whatsapp: '34612345678' }]
+    ])
+  })
+
+  it('detecta el país al editar y permite pegar un número con +', async () => {
+    const { emitted } = render(AdminReviewClientForm, {
+      props: { client: { ...client, whatsapp: '34612345678' } }
+    })
+
+    expect(screen.getByLabelText('País / código')).toHaveValue('ES')
+    expect(screen.getByLabelText(/Número de WhatsApp/)).toHaveValue('612345678')
+
+    await fireEvent.update(screen.getByLabelText(/Número de WhatsApp/), '+52 56 3127 0122')
+    expect(screen.getByLabelText('País / código')).toHaveValue('MX')
+    expect(screen.getByLabelText(/Número de WhatsApp/)).toHaveValue('5631270122')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cliente' }))
+    const saveEvents = emitted().save as Array<[{ whatsapp: string }]>
+    expect(saveEvents[0]?.[0]?.whatsapp).toBe('525631270122')
   })
 
   it('carga los datos del cliente a editar y permite cancelar', async () => {

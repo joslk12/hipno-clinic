@@ -2,7 +2,7 @@
 
 Sitio web de Origen Consciente: hipnosis regresiva, regenerativa y sanación emocional en Santiago Tolman, Estado de México.
 
-Aplicación estática generada con Vue 3 + TypeScript + Vite, prerenderizada con `vite-ssg` para que los metadatos y las tarjetas Open Graph funcionen sin JavaScript. El formulario de contacto usa Netlify Forms y las reseñas usan Netlify Functions + Netlify Blobs.
+Aplicación estática generada con Vue 3 + TypeScript + Vite, prerenderizada con `vite-ssg` para que los metadatos y las tarjetas Open Graph funcionen sin JavaScript. El formulario de contacto usa Netlify Forms cuando no hay horarios publicados; las reservas, los artículos y las clientas viven en Netlify DB (Postgres/Neon), y las imágenes, reseñas, invitaciones y límites de intentos siguen en Netlify Blobs.
 
 ## Stack
 
@@ -13,6 +13,7 @@ Aplicación estática generada con Vue 3 + TypeScript + Vite, prerenderizada con
 - Tailwind CSS
 - Vitest y Playwright
 - `@unhead/vue` para metadatos por ruta
+- `@netlify/neon` (Netlify DB / Postgres) y `@netlify/blobs` (imágenes y datos operativos)
 
 ## Requisitos
 
@@ -39,8 +40,22 @@ Edita `.env.local` con los valores del entorno local.
 | `REVIEWS_RATE_SALT` | Sí (funciones) | Sal secreta para hashear IPs y aplicar el límite de 3 reseñas por IP/24 h. |
 | `RESEND_API_KEY` | Sí (envío) | Clave de la API de Resend para enviar las ligas por correo. |
 | `REVIEWS_FROM_EMAIL` | Sí (envío) | Remitente verificado de Resend, p. ej. `Origen Consciente <hola@origenconsciente.mx>`. |
+| `DATABASE_URL` | Sí (datos) | Connection string de Netlify DB/Neon. También se acepta `NETLIFY_DATABASE_URL`. Debe ir marcada como secreta. |
+| `BLOG_ADMIN_PASSWORD` | Sí (admin) | Contraseña del panel administrativo. |
+| `BLOG_SESSION_SECRET` | Sí (admin) | Secreto para firmar la cookie de sesión (mínimo 32 caracteres aleatorios). |
+| `BLOG_BUILD_HOOK_URL` | Sí (blog) | Build hook para regenerar el blog al publicar artículos. |
+| `APPOINTMENTS_NOTIFICATION_EMAIL` | No | Correo que recibe el aviso de nuevas citas. Si falta, se usa `BLOG_ADMIN_EMAIL` o `REVIEWS_FROM_EMAIL`. |
+| `APPOINTMENTS_WHATSAPP_NUMBER` | No | Número de la clínica para el aviso de citas por WhatsApp Cloud API. Requiere además `WHATSAPP_ACCESS_TOKEN` y `WHATSAPP_PHONE_NUMBER_ID`. |
 
-El envío de WhatsApp es manual: desde `/admin/resenas` se genera la liga y un mensaje listo para copiar o abrir con `wa.me`, usando el WhatsApp personal de la clínica. No se necesita WhatsApp Business ni Cloud API.
+El envío de WhatsApp de invitaciones es manual: desde `/admin/resenas` se genera la liga y un mensaje listo para copiar o abrir con `wa.me`, usando el WhatsApp personal de la clínica. No se necesita WhatsApp Business ni Cloud API para invitaciones.
+
+### Base de datos y almacenamiento
+
+`DATABASE_URL` apunta a Netlify DB (Postgres/Neon). Al primer arranque en frío se crean las tablas `blog_posts`, `review_clients`, `availability_rules`, `schedule_slots`, `appointments` y `migration_state`, y se copian una sola vez los artículos (`post:`) y las clientas (`client:`) que ya existían en Blobs. Las imágenes (`image:`) no se migran: siguen sirviéndose desde `/api/blog/images?key=...`.
+
+Si no hay `DATABASE_URL`, el sitio sigue usando los stores anteriores de Blobs para artículos y clientas, de modo que un deploy previo a la configuración no se rompe. Reseñas, invitaciones y rate limits siempre permanecen en Blobs.
+
+**Seguridad**: si alguna connection string se compartió o comprometió, rota la contraseña en Netlify DB antes de guardarla como variable de entorno. No la escribas en `.env.local`, `.env.netlify` ni en el repositorio.
 
 En Netlify, define las mismas variables en **Site configuration → Environment variables**. `VITE_SITE_URL` debe coincidir con el dominio final para que canonical, OG y sitemap sean correctos.
 
@@ -106,6 +121,25 @@ El sitio usa **Netlify Forms** con el formulario `contact`:
 En `npm run dev` no hay backend de Netlify, por lo que el envío fallará; usa `netlify dev` o prueba en un deploy de Netlify.
 
 Las etiquetas que aparecen en el correo de notificación provienen del texto de los `<label>` que envuelven cada campo.
+
+## Citas
+
+Cuando el terapeuta publica disponibilidad en `/admin/citas`, `/contacto` muestra además un calendario con horarios seleccionables. Si se elige un horario, el envío crea una reserva en lugar de usar Netlify Forms; si no hay horarios o falla la consulta, el formulario sigue funcionando exactamente como antes.
+
+- Zona horaria: `America/Mexico_City`. Los horarios se guardan en UTC y se muestran en `es-MX`.
+- Horizonte de consulta: 60 días.
+- La reserva es atómica: un índice único parcial impide que dos personas tomen el mismo `slotKey`. Si ocurre una carrera, la segunda recibe `409` y puede elegir otro horario sin perder sus datos.
+- Cancelar una cita libera el horario salvo que esté bloqueado explícitamente.
+
+### APIs de citas
+
+- `GET /api/appointments/slots?from=YYYY-MM-DD&to=YYYY-MM-DD&serviceId=...`: horarios disponibles, sin datos privados.
+- `POST /api/appointments`: crear reserva. `201`, `400`, `409` (horario ocupado) o `503` (sin base de datos).
+- `GET/POST/PATCH/DELETE /api/admin/appointments/rules`: reglas recurrentes por día de semana.
+- `GET/POST/PATCH/DELETE /api/admin/appointments/slots`: horarios individuales y bloqueos.
+- `GET /api/admin/appointments/bookings` y `PATCH /api/admin/appointments/bookings?id=...`: listado y cancelación.
+
+Todas las rutas `/api/admin/*` usan la misma sesión HMAC que `/admin/blog`.
 
 ## Reseñas de clientas
 
@@ -176,7 +210,7 @@ src/
   stores/       # Estado de agendamiento
   styles/       # Tokens y estilos globales
   views/        # Páginas
-netlify/        # Functions y librería de reseñas
+netlify/        # Functions y librerías de blog, base de datos, citas y reseñas
 public/         # Favicons, OG, robots y sitemap
 scripts/        # Generación y validación en build
 tests/e2e/      # Playwright: flujo, accesibilidad, responsive, red

@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { ScheduleSlot } from '../types/appointments'
 
 export interface ContactForm {
   name: string
@@ -17,7 +18,9 @@ export const useBookingStore = defineStore('booking', {
     form: emptyForm(),
     errors: {} as Partial<Record<keyof ContactForm, string>>,
     status: 'idle' as SubmitStatus,
-    feedback: ''
+    feedback: '',
+    selectedSlot: null as ScheduleSlot | null,
+    slotError: ''
   }),
   actions: {
     selectService(id: string) {
@@ -25,6 +28,17 @@ export const useBookingStore = defineStore('booking', {
     },
     clearService() {
       this.selectedServiceId = null
+    },
+    selectSlot(slot: ScheduleSlot) {
+      this.selectedSlot = slot
+      this.slotError = ''
+    },
+    clearSlot() {
+      this.selectedSlot = null
+    },
+    setSlotError(message = '') {
+      this.slotError = message
+      if (message) this.selectedSlot = null
     },
     setField(field: keyof ContactForm, value: string) {
       this.form[field] = value
@@ -47,6 +61,8 @@ export const useBookingStore = defineStore('booking', {
       this.errors = {}
       this.status = 'idle'
       this.feedback = ''
+      this.selectedSlot = null
+      this.slotError = ''
     }
   }
 })

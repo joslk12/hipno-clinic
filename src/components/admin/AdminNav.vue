@@ -12,7 +12,8 @@ const props = withDefaults(
         appointmentsAvailable?: boolean
     }>(),
     {
-        active: ''
+        active: '',
+        appointmentsAvailable: undefined
     }
 );
 
@@ -55,7 +56,7 @@ const sections = computed(() => [
                 aria-disabled
                 class="min-h-9 rounded-md px-3 py-2 font-body text-sm text-text-muted/60"
             >
-                Citas <span class="text-xs uppercase tracking-wider">(Próximamente)</span>
+                Citas
             </span>
 
             <BaseButton type="button" variant="ghost" size="sm" class="ml-auto" @click="emit('logout')">

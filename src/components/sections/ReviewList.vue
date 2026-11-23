@@ -23,7 +23,7 @@ const emit = defineEmits<{ retry: [] }>()
 
 <template>
   <div>
-    <h2 class="font-display text-2xl font-semibold text-accent">Opiniones de clientas</h2>
+    <h2 class="font-display text-2xl font-semibold text-accent">Opiniones de clientes</h2>
 
     <div
       v-if="status === 'loading'"
